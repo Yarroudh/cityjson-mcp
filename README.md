@@ -110,7 +110,7 @@ Configure your MCP client to launch the local image over stdio:
   "mcpServers": {
     "cityjson": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "cityjson-toolbox-mcp"]
+      "args": ["run", "--rm", "-i", "cityjson-mcp"]
     }
   }
 }
@@ -134,7 +134,7 @@ The MCP server itself needs:
 Install its JavaScript dependencies:
 
 ```bash
-cd cityjson-toolbox-mcp
+cd cityjson-mcp
 npm install
 ```
 
@@ -263,7 +263,7 @@ A ready-to-edit template is included at [`config/claude-desktop.json`](config/cl
   "mcpServers": {
     "cityjson-toolbox": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "cityjson-toolbox-mcp"]
+      "args": ["run", "--rm", "-i", "cityjson-mcp"]
     }
   }
 }
@@ -320,7 +320,7 @@ Example:
     "cityjson-toolbox": {
       "type": "stdio",
       "command": "docker",
-      "args": ["run", "--rm", "-i", "cityjson-toolbox-mcp"]
+      "args": ["run", "--rm", "-i", "cityjson-mcp"]
     }
   }
 }
@@ -356,7 +356,7 @@ Example:
     "cityjson-toolbox": {
       "type": "stdio",
       "command": "docker",
-      "args": ["run", "--rm", "-i", "cityjson-toolbox-mcp"]
+      "args": ["run", "--rm", "-i", "cityjson-mcp"]
     }
   }
 }
@@ -860,7 +860,7 @@ The included [`docker/Dockerfile`](docker/Dockerfile) installs:
 Build it with:
 
 ```bash
-docker build -f docker/Dockerfile -t cityjson-toolbox-mcp .
+docker build -f docker/Dockerfile -t cityjson-mcp .
 ```
 
 Or use the equivalent package script:
@@ -886,7 +886,7 @@ See [`docker/README.md`](docker/README.md).
 # Development layout
 
 ```text
-cityjson-toolbox-mcp/
+cityjson-mcp/
 ├── src/
 │   ├── index.mjs                 # MCP server entry point
 │   ├── core/
