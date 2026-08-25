@@ -1,0 +1,29 @@
+{
+  "version": "2.0.2",
+  "published": "2026-03-27",
+  "specUrl": "https://www.cityjson.org/specs/2.0.2/",
+  "schemaBaseUrl": "https://3d.bk.tudelft.nl/schemas/cityjson/2.0.2/",
+  "chapters": [
+    {"id":"cityjson-object","title":"CityJSON Object"},
+    {"id":"city-objects","title":"The different City Objects"},
+    {"id":"geometry-objects","title":"Geometry Objects"},
+    {"id":"transform","title":"Transform Object"},
+    {"id":"metadata","title":"Metadata"},
+    {"id":"appearance","title":"Appearance Object"},
+    {"id":"large-files","title":"Handling large files"},
+    {"id":"extensions","title":"Extensions"},
+    {"id":"schemas","title":"CityJSON schemas"},
+    {"id":"citygml-implementation","title":"CityGML v3.0 implementation details"}
+  ],
+  "schemas": [
+    "cityjson.schema.json",
+    "cityjson.min.schema.json",
+    "cityjsonfeature.schema.json",
+    "cityjsonfeature.min.schema.json",
+    "cityobjects.schema.json",
+    "geomprimitives.schema.json",
+    "geomtemplates.schema.json",
+    "metadata.schema.json",
+    "appearance.schema.json"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cityjson-toolbox": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "cityjson-toolbox-mcp"
+      ]
+    }
+  }
+}

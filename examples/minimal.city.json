@@ -1,0 +1,49 @@
+{
+  "type": "CityJSON",
+  "version": "2.0",
+  "transform": {
+    "scale": [0.1, 0.1, 0.1],
+    "translate": [100.0, 200.0, 0.0]
+  },
+  "metadata": {
+    "referenceSystem": "https://www.opengis.net/def/crs/EPSG/0/7415"
+  },
+  "CityObjects": {
+    "building-1": {
+      "type": "Building",
+      "attributes": {
+        "yearOfConstruction": 2020,
+        "name": "Example building"
+      },
+      "geometry": [
+        {
+          "type": "MultiSurface",
+          "lod": "2.2",
+          "boundaries": [
+            [[0, 1, 2, 3]]
+          ]
+        }
+      ]
+    },
+    "tree-1": {
+      "type": "SolitaryVegetationObject",
+      "attributes": {
+        "species": "Example species"
+      },
+      "geometry": [
+        {
+          "type": "MultiPoint",
+          "lod": "1",
+          "boundaries": [4]
+        }
+      ]
+    }
+  },
+  "vertices": [
+    [0, 0, 0],
+    [100, 0, 0],
+    [100, 100, 0],
+    [0, 100, 0],
+    [200, 200, 0]
+  ]
+}

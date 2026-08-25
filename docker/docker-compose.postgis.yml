@@ -1,0 +1,14 @@
+services:
+  postgis:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: cityjson
+      POSTGRES_PASSWORD: cityjson-dev-only
+      POSTGRES_DB: cityjson
+    ports:
+      - "5432:5432"
+    volumes:
+      - cityjson_postgis:/var/lib/postgresql/data
+
+volumes:
+  cityjson_postgis:

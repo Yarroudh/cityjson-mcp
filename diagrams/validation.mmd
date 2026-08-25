@@ -1,0 +1,16 @@
+flowchart LR
+  DATA["Opened CityJSON<br/>dataset_id"]
+  ALL["cityjson_validate"]
+  CJVAL["cityjson_validate_schema<br/>cjval"]
+  VAL3["cityjson_validate_geometry<br/>val3dity"]
+  STRUCT["JSON + schema + structural<br/>consistency result"]
+  GEOM["ISO 19107-style 3D<br/>geometry report"]
+  COMBINE["Combined validation result"]
+
+  DATA --> ALL
+  ALL --> CJVAL
+  ALL --> VAL3
+  CJVAL --> STRUCT
+  VAL3 --> GEOM
+  STRUCT --> COMBINE
+  GEOM --> COMBINE
