@@ -13,7 +13,7 @@ It gives MCP clients such as Claude Desktop, Cursor and VS Code a stable CityJSO
 
 The server exposes **35 MCP tools**. Transformations use **immutable dataset handles**: an operation such as `cityjson_subset` returns a new `dataset_id` and does not overwrite the source dataset.
 
-> Status: this is a practical v0.1 implementation. The recommended Docker image bundles every external backend; host-native development still requires installing the individual commands.
+> Status: this is a practical v0.1 implementation. The recommended Docker image bundles every external backend; development without Docker still requires installing the individual commands.
 
 ## Architecture
 
@@ -114,7 +114,7 @@ Configure your MCP client to launch the image over stdio:
 }
 ```
 
-Attach a CityJSON file to the conversation and ask the client to pass its complete JSON text to `cityjson_upload`. The tool returns a `dataset_id` used by the other tools. No host data-directory mount or `CITYJSON_MCP_ALLOWED_ROOTS` setting is needed for this workflow.
+Attach a CityJSON file and ask the assistant to inspect, validate, or transform it. The assistant imports it with `cityjson_upload` and uses the returned `dataset_id` for subsequent operations. This does not require a mounted data directory or a `CITYJSON_MCP_ALLOWED_ROOTS` setting.
 
 The image includes `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`; no host Python, Rust, Java, or geospatial libraries are required. Docker automatically pulls newer image layers when needed after you run `docker pull yarroudh/cityjson-mcp:latest` again.
 
@@ -257,7 +257,7 @@ npm run doctor
 npm test
 ```
 
-Then configure one of the MCP clients below. The supplied templates launch the complete Docker image; contributors can replace the Docker command with an absolute path to `node src/index.mjs` and set the host-native environment variables above.
+Then configure one of the MCP clients below. The supplied templates launch the complete Docker image. Contributors can replace the Docker command with an absolute path to `node src/index.mjs` and set the environment variables above.
 
 ---
 
@@ -265,7 +265,7 @@ Then configure one of the MCP clients below. The supplied templates launch the c
 
 Claude Desktop local MCP configurations use an `mcpServers` object. The supplied template launches the locally built image.
 
-A ready-to-edit template is included at [`config/claude-desktop.json`](config/claude-desktop.json).
+The Claude Desktop template is in [`config/claude-desktop.json`](config/claude-desktop.json).
 
 ```json
 {
@@ -291,7 +291,7 @@ Merge the template into the client configuration, then fully quit and reopen Cla
 
 # Add it to Claude Code
 
-A ready-to-use project template is included at [`config/claude-code.json`](config/claude-code.json). Copy it to `.mcp.json` in the project where you run Claude Code:
+The Claude Code template is in [`config/claude-code.json`](config/claude-code.json). Copy it to `.mcp.json` in the project where you run Claude Code:
 
 ```bash
 cp config/claude-code.json .mcp.json
@@ -307,7 +307,7 @@ Cursor supports local stdio MCP servers in `mcp.json`.
 
 A template is included at [`config/cursor-mcp.json`](config/cursor-mcp.json).
 
-Project-scoped configuration:
+Project configuration:
 
 ```text
 your-project/
@@ -710,7 +710,7 @@ Subset export:
 }
 ```
 
-The wrapper rejects non-`SELECT` SQL, semicolons, and obvious modifying keywords. This is a guardrail, **not a SQL security boundary**: use a database role with only the permissions appropriate for the operation. Prefer a read-only role for exports.
+The wrapper rejects SQL other than `SELECT`, semicolons, and obvious modifying keywords. This is a guardrail, **not a SQL security boundary**: use a database role with only the permissions appropriate for the operation. For exports, use a role that cannot modify data.
 
 ## Specification, schema and extension knowledge
 
@@ -824,14 +824,14 @@ host file ─────cityjson_open────> cj_A
                                   │                   │
                                   │                   └── reproject ──> cj_C
                                   │
-                                  └── validate (read-only)
+                                  └── validate (does not modify data)
 ```
 
 - `cityjson_open` registers the original path.
 - `cityjson_upload` imports attached CityJSON text directly into the managed workspace and returns the initial dataset ID.
 - A transformation asks the backend to write a new file inside `CITYJSON_MCP_WORKSPACE`.
 - The server opens the produced file and gives it a new random `dataset_id`.
-- `cityjson_save` is the explicit step that copies a chosen state to a user-facing destination.
+- `cityjson_save` is the explicit step that copies a chosen state to a destination selected by the user.
 
 This makes it much easier for an agent to compare before/after validation and prevents normal transformation calls from silently overwriting the original source.
 
@@ -844,11 +844,11 @@ This server executes powerful geospatial programs locally. Treat MCP server inst
 Built-in guardrails:
 
 1. **Allowed roots** — host-path operations must be within `CITYJSON_MCP_ALLOWED_ROOTS` or the managed workspace. Uploads are written directly to the managed workspace and do not require a host-path allowance.
-2. **No arbitrary shell tool** — there is no `run_shell` or free-form `run_cjio` MCP tool.
+2. **No arbitrary shell tool** — there is no `run_shell` command or unrestricted `run_cjio` MCP tool.
 3. **No shell interpolation** — external programs are invoked with argument arrays and `shell: false`.
 4. **Typed tool schemas** — Zod restricts types, enums, EPSG integers, bbox shapes, database schema identifiers, etc.
 5. **PostgreSQL password stays in environment** — database tool schemas do not contain a password field.
-6. **DB export SQL guard** — only single `SELECT` strings without semicolons/obvious mutating keywords are accepted. Still use a least-privilege DB role.
+6. **DB export SQL guard** — only single `SELECT` strings without semicolons or obvious mutating keywords are accepted. Still use a database role with only the required permissions.
 7. **Command timeout/output cap** — subprocesses default to a 120-second timeout and bounded captured output. Set `CITYJSON_MCP_COMMAND_TIMEOUT_MS` for large jobs.
 
 For shared or production environments, run the MCP under an OS account/container with only the filesystem and database permissions it actually needs.
