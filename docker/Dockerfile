@@ -40,7 +40,7 @@ RUN apt-get update \
 # explicitly with the remaining export/reprojection dependencies.
 RUN python3 -m venv /opt/cjio \
  && /opt/cjio/bin/pip install --no-cache-dir \
-      'cjio==0.10.1' pandas mapbox-earcut 'triangle==20250106' pyproj \
+      'cjio==0.10.1' pandas mapbox-earcut 'triangle==20200424' pyproj \
  && ln -s /opt/cjio/bin/cjio /usr/local/bin/cjio
 
 RUN python3 -m venv /opt/cjdb \
