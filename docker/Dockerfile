@@ -28,7 +28,7 @@ COPY --from=val3dity-builder /src/val3dity/build/val3dity /usr/local/bin/val3dit
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      build-essential ca-certificates curl unzip python3 python3-dev python3-pip \
+      build-essential ca-certificates curl git unzip python3 python3-dev python3-pip \
       python3-venv openjdk-17-jre-headless \
       libboost-filesystem1.74.0 libboost-program-options1.74.0 \
       libboost-system1.74.0 libgeos-c1v5 libgmp10 libmpfr6 \
@@ -36,11 +36,13 @@ RUN apt-get update \
 
 # cjdb 2.3 requires cjio <0.10, while the MCP's cjio tools use cjio 0.10.1.
 # Isolated environments keep both official CLIs current without resolver backtracking.
-# triangle2 has no Linux ARM64 package, so install the compatible `triangle` module
-# explicitly with the remaining export/reprojection dependencies.
+# triangle2 has no Linux ARM64 package. The older triangle source archive on
+# PyPI does not compile with Python 3.11, so install the current source revision.
 RUN python3 -m venv /opt/cjio \
  && /opt/cjio/bin/pip install --no-cache-dir \
-      'cjio==0.10.1' pandas mapbox-earcut 'triangle==20200424' pyproj \
+      'cjio==0.10.1' pandas mapbox-earcut \
+      'triangle @ git+https://github.com/drufat/triangle.git@595b43eb6682992a0b1012b9671bf860c0e6ae56' \
+      pyproj \
  && ln -s /opt/cjio/bin/cjio /usr/local/bin/cjio
 
 RUN python3 -m venv /opt/cjdb \
