@@ -1,4 +1,4 @@
-# CityJSON Toolbox MCP
+# CityJSON MCP
 
 A local **Model Context Protocol (MCP) server for actually working with CityJSON**, rather than only reading the specification.
 
