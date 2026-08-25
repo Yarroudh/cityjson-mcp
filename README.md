@@ -95,22 +95,20 @@ Each transformation returns a new `dataset_id`, so intermediate states remain av
 
 ## Recommended: complete Docker runtime
 
-The end-user runtime puts the MCP server and all five backends in one image. Install Docker Desktop, then build the local image:
+The end-user runtime puts the MCP server and all five backends in one image. Install Docker Desktop, then pull the published image from Docker Hub:
 
 ```bash
-npm install
-npm run docker:build
-npm run docker:doctor
+docker pull yarroudh/cityjson-mcp:latest
 ```
 
-Configure your MCP client to launch the local image over stdio:
+Configure your MCP client to launch the image over stdio:
 
 ```json
 {
   "mcpServers": {
     "cityjson": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "cityjson-mcp"]
+      "args": ["run", "--rm", "-i", "yarroudh/cityjson-mcp:latest"]
     }
   }
 }
@@ -118,9 +116,20 @@ Configure your MCP client to launch the local image over stdio:
 
 Attach a CityJSON file to the conversation and ask the client to pass its complete JSON text to `cityjson_upload`. The tool returns a `dataset_id` used by the other tools. No host data-directory mount or `CITYJSON_MCP_ALLOWED_ROOTS` setting is needed for this workflow.
 
-The image includes `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`; no host Python, Rust, Java, or geospatial libraries are required. The host-native setup below remains available for contributors.
+The image includes `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`; no host Python, Rust, Java, or geospatial libraries are required. Docker automatically pulls newer image layers when needed after you run `docker pull yarroudh/cityjson-mcp:latest` again.
 
-## Host-native contributor setup
+To build the image from source instead, build the two slow compiler stages first so Docker can cache them, then build the remaining image:
+
+```bash
+docker build -f docker/Dockerfile --target val3dity-builder -t cityjson-mcp-val3dity-builder .
+docker build -f docker/Dockerfile --target cjval-builder -t cityjson-mcp-cjval-builder .
+docker build -f docker/Dockerfile -t cityjson-mcp .
+docker run --rm --entrypoint node cityjson-mcp /app/scripts/doctor.mjs
+```
+
+If a later layer fails, rerunning the final command reuses the completed `val3dity` and `cjval` layers instead of compiling them from scratch.
+
+## Optional: run without Docker
 
 The following sections are only needed when running `node src/index.mjs` directly instead of using the complete Docker image.
 
@@ -857,21 +866,21 @@ The included [`docker/Dockerfile`](docker/Dockerfile) installs:
 - `val3dity`
 - `citygml-tools`
 
-Build it with:
+Most users should pull the published image:
 
 ```bash
+docker pull yarroudh/cityjson-mcp:latest
+```
+
+For a local source build, cache the two expensive compiler stages before building the rest:
+
+```bash
+docker build -f docker/Dockerfile --target val3dity-builder -t cityjson-mcp-val3dity-builder .
+docker build -f docker/Dockerfile --target cjval-builder -t cityjson-mcp-cjval-builder .
 docker build -f docker/Dockerfile -t cityjson-mcp .
 ```
 
-Or use the equivalent package script:
-
-```bash
-npm run docker:build
-```
-
-The client templates run this local image name directly. A Docker Hub username is only needed after the image is published under a remote repository name.
-
-Run `npm run docker:doctor` after building to verify all five executables.
+Run `docker run --rm --entrypoint node cityjson-mcp /app/scripts/doctor.mjs` after a local build to verify all five executables.
 
 Development PostGIS:
 
