@@ -20,7 +20,7 @@ The server exposes **35 MCP tools**. Transformations use **immutable dataset han
 ```mermaid
 flowchart LR
   CLIENT["MCP clients<br/>Claude Desktop · Cursor · VS Code"]
-  SERVER["Docker container<br/>CityJSON Toolbox MCP · stdio server"]
+  SERVER["Docker container<br/>CityJSON MCP · stdio server"]
   CORE["Dataset manager<br/>immutable handles + path policy"]
   NATIVE["Native inspection/query<br/>JSON + CityObjects + bbox"]
   CJIO["cjio<br/>transform · subset · export"]
@@ -75,7 +75,7 @@ flowchart TD
 
 A user can say, for example:
 
-> Open `/data/rotterdam.city.json`, validate both its CityJSON structure and 3D geometry, keep only Buildings inside bbox `[90000, 435000, 91000, 436000]`, reproject the result to EPSG:28992, clean duplicate/orphan vertices, validate the result again, and save it as `/data/rotterdam-subset.city.json`.
+> Open `/input/rotterdam.city.json`, validate both its CityJSON structure and 3D geometry, keep only Buildings inside bbox `[90000, 435000, 91000, 436000]`, reproject the result to EPSG:28992, clean duplicate and orphan vertices, validate the result again, and return it with `cityjson_download`.
 
 An MCP client can resolve that request approximately as:
 
@@ -95,13 +95,23 @@ Each transformation returns a new `dataset_id`, so intermediate states remain av
 
 ## Recommended: complete Docker runtime
 
-The end-user runtime puts the MCP server and all five backends in one image. Install Docker Desktop, then pull the published image from Docker Hub:
+The Docker image contains the MCP server and all five backends. Install Docker Desktop, then pull the image from Docker Hub:
 
 ```bash
 docker pull yarroudh/cityjson-mcp:latest
 ```
 
-Configure your MCP client to launch the image over stdio:
+Confirm that every backend is present:
+
+```bash
+docker run --rm --entrypoint node yarroudh/cityjson-mcp:latest /app/scripts/doctor.mjs
+```
+
+The output should report `OK` for `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`.
+
+### Choose how files enter the container
+
+For small files, the client can read the attachment and send its JSON text to `cityjson_upload`:
 
 ```json
 {
@@ -114,17 +124,44 @@ Configure your MCP client to launch the image over stdio:
 }
 ```
 
-Attach a CityJSON file and ask the assistant to inspect, validate, or transform it. The assistant imports it with `cityjson_upload` and uses the returned `dataset_id` for subsequent operations. This does not require a mounted data directory or a `CITYJSON_MCP_ALLOWED_ROOTS` setting.
+This method passes the complete document through an MCP argument. Although the server accepts uploads up to 25 MiB by default, the client or model can have a much smaller practical message limit. Do not use this method for large CityJSON models.
+
+For large files, mount their host directory. Replace `/absolute/path/to/cityjson-files` with a real absolute path:
+
+```json
+{
+  "mcpServers": {
+    "cityjson": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--mount",
+        "type=bind,source=/absolute/path/to/cityjson-files,target=/input,readonly",
+        "--env",
+        "CITYJSON_MCP_ALLOWED_ROOTS=/input:/data",
+        "yarroudh/cityjson-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+The host directory appears as `/input` inside Docker. For example, `/absolute/path/to/cityjson-files/model.city.json` becomes `/input/model.city.json`. The input mount cannot be modified. Derived datasets and reports go to Docker's managed `/data` workspace.
+
+Chat attachment paths such as `/mnt/user-data/...` and `/home/claude/...` belong to the client's private environment. They do not exist inside the MCP container and must never be passed to `cityjson_open`.
 
 The image includes `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`; no host Python, Rust, Java, or geospatial libraries are required. Docker automatically pulls newer image layers when needed after you run `docker pull yarroudh/cityjson-mcp:latest` again.
 
-To build the image from source instead, build the two slow compiler stages first so Docker can cache them, then build the remaining image:
+To build from source, cache the two slow compiler stages before building the remaining image:
 
 ```bash
-docker build -f docker/Dockerfile --target val3dity-builder -t cityjson-mcp-val3dity-builder .
-docker build -f docker/Dockerfile --target cjval-builder -t cityjson-mcp-cjval-builder .
-docker build -f docker/Dockerfile -t cityjson-mcp .
-docker run --rm --entrypoint node cityjson-mcp /app/scripts/doctor.mjs
+npm install
+npm run docker:cache:val3dity
+npm run docker:cache:cjval
+npm run docker:build
+npm run docker:doctor
 ```
 
 If a later layer fails, rerunning the final command reuses the completed `val3dity` and `cjval` layers instead of compiling them from scratch.
@@ -263,16 +300,16 @@ Then configure one of the MCP clients below. The supplied templates launch the c
 
 # Add it to Claude Desktop
 
-Claude Desktop local MCP configurations use an `mcpServers` object. The supplied template launches the locally built image.
+Claude Desktop local MCP configurations use an `mcpServers` object. The supplied template launches the published image without a host mount. Add the mount shown in the quick start when working with large files.
 
 The Claude Desktop template is in [`config/claude-desktop.json`](config/claude-desktop.json).
 
 ```json
 {
   "mcpServers": {
-    "cityjson-toolbox": {
+    "cityjson": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "cityjson-mcp"]
+      "args": ["run", "--rm", "-i", "yarroudh/cityjson-mcp:latest"]
     }
   }
 }
@@ -284,6 +321,16 @@ Typical configuration locations for Claude Desktop local servers are:
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
 Merge the template into the client configuration, then fully quit and reopen Claude Desktop. The `config/` directory contains templates; Claude does not read it automatically.
+
+In a normal Claude chat, click **+**, open **Connectors**, enable **cityjson**, and allow its tools under **Tool access**. The connector is available only to chats where it is enabled. `/input` exists inside the connector container, not inside Claude's code environment.
+
+To verify tool use on macOS:
+
+```bash
+tail -f "$HOME/Library/Logs/Claude/mcp-server-cityjson.log"
+```
+
+Successful calls appear as `method="tools/call"` followed by a server result. Press `Ctrl+C` to stop watching.
 
 > Claude Desktop also supports packaged MCP Bundles/Extensions. This repository is delivered as source ZIP so it remains transparent and editable; the direct stdio configuration above is the simplest development setup.
 
@@ -326,10 +373,10 @@ Example:
 ```json
 {
   "mcpServers": {
-    "cityjson-toolbox": {
+    "cityjson": {
       "type": "stdio",
       "command": "docker",
-      "args": ["run", "--rm", "-i", "cityjson-mcp"]
+      "args": ["run", "--rm", "-i", "yarroudh/cityjson-mcp:latest"]
     }
   }
 }
@@ -362,10 +409,10 @@ Example:
 ```json
 {
   "servers": {
-    "cityjson-toolbox": {
+    "cityjson": {
       "type": "stdio",
       "command": "docker",
-      "args": ["run", "--rm", "-i", "cityjson-mcp"]
+      "args": ["run", "--rm", "-i", "yarroudh/cityjson-mcp:latest"]
     }
   }
 }
@@ -383,17 +430,23 @@ flowchart LR
   CLAUDECODE["Claude Code<br/>.mcp.json"]
   CURSOR["Cursor<br/>.cursor/mcp.json"]
   VSCODE["VS Code<br/>.vscode/mcp.json"]
-  DOCKER["Local Docker image<br/>MCP stdio"]
-  UPLOAD["cityjson_upload<br/>managed workspace"]
+  DOCKER["CityJSON MCP Docker image<br/>MCP stdio"]
+  INPUT["Mounted files<br/>/input"]
+  UPLOAD["Small JSON content<br/>cityjson_upload"]
+  WS["Managed workspace<br/>/data"]
   TOOLS["Bundled backends<br/>cjio · cjval · val3dity · citygml-tools · cjdb"]
 
   CLAUDE --> DOCKER
   CLAUDECODE --> DOCKER
   CURSOR --> DOCKER
   VSCODE --> DOCKER
-  DOCKER --> UPLOAD
+  INPUT --> DOCKER
+  UPLOAD --> DOCKER
+  DOCKER --> WS
   DOCKER --> TOOLS
 ```
+
+[Download PNG — high resolution](diagrams/client-setup.png)
 
 ---
 
@@ -416,13 +469,15 @@ Call this before tools requiring `dataset_id`:
 
 ```json
 {
-  "source": "/data/amsterdam.city.json"
+  "source": "/input/amsterdam.city.json"
 }
 ```
 
+`/input` is the recommended read only host mount. Paths from a chat attachment or the client's code environment are not visible inside Docker.
+
 ### `cityjson_upload`
 
-Use this when an attached CityJSON file is available to the client as content but not as a path inside the Docker `/data` mount:
+Use this when a small attached CityJSON file is available to the client as content but not as a path inside Docker:
 
 ```json
 {
@@ -431,7 +486,7 @@ Use this when an attached CityJSON file is available to the client as content bu
 }
 ```
 
-The content is structurally checked before it is written to the managed workspace. Uploads default to a 25 MiB limit; configure `CITYJSON_MCP_MAX_UPLOAD_BYTES` for a different limit. Mounted `/data` files remain preferable for large models.
+The content is structurally checked before it is written to the managed workspace. Uploads default to a 25 MiB server limit, but client message limits can be much smaller. Use a mounted `/input` directory for large models.
 
 ### `cityjson_download`
 
@@ -644,7 +699,7 @@ Example CityGML → CityJSON:
 
 ```json
 {
-  "source": "/data/model.gml",
+  "source": "/input/model.gml",
   "json_lines": false
 }
 ```
@@ -766,41 +821,41 @@ A future adapter could delegate `cityjson_spec_read` to `cj-mcp` without changin
 
 # Recommended prompts / recipes
 
-These prompts are written so an MCP-capable agent has enough intent to choose the correct tools.
+These prompts assume the host file directory is mounted at `/input`. They explicitly prevent the client from checking `/input` in its own code environment.
 
 ### Inspect before modifying
 
-> Open `/data/tile.city.json`. Tell me the CityJSON version, CRS, CityObject counts by type, LoDs, attribute names, and extensions. Do not modify anything.
+> Call `cityjson_open` with `source` set to `/input/tile.city.json`. Do not use bash, Python, the code environment, attachment tools, or connector search. Tell me the CityJSON version, CRS, CityObject counts by type, LoDs, attribute names, and extensions. Do not modify anything.
 
 Expected tools: `cityjson_open` → `cityjson_info`.
 
 ### Validate and diagnose
 
-> Validate `/data/tile.city.json` structurally and geometrically. Separate cjval warnings from errors, group val3dity errors by error code, identify the affected CityObject IDs, and consult the CityJSON specification when an error is about a CityJSON structural rule.
+> Open `/input/tile.city.json` with `cityjson_open`, then validate it with `cjval` and `val3dity`. Use only the CityJSON connector tools. Separate cjval warnings from errors, group val3dity errors by error code, identify the affected CityObject IDs, and consult the CityJSON specification when an error is about a CityJSON structural rule. If a validation report exceeds the tool output limit, create nonoverlapping spatial subsets, validate each subset, and aggregate the counts without double counting. Do not modify the original file.
 
 Expected tools: `cityjson_open` → `cityjson_validate` → optionally `cityjson_get_object` / `cityjson_spec_read`.
 
 ### Safe cleanup loop
 
-> Open `/data/tile.city.json`, run structural validation, and if the only structural warnings are duplicate/unused vertices, create a cleaned derived dataset, re-run full validation, and save the validated result to `/data/tile-clean.city.json`. Never overwrite the original.
+> Open `/input/tile.city.json`, run structural validation, and if the only structural warnings are duplicate or unused vertices, create a cleaned derived dataset, run full validation again, and return the result with `cityjson_download` as `tile-clean.city.json`. Never overwrite the original.
 
 Expected tools: `cityjson_open` → `cityjson_validate_schema` → `cityjson_clean_vertices` → `cityjson_validate` → `cityjson_save`.
 
 ### Spatial extract
 
-> From `/data/city.city.json`, extract only Building and BuildingPart objects intersecting bbox `[85000, 446000, 86000, 447000]`, keep LoD 2.2, reproject to EPSG:28992, validate the result, then save it as `/data/extract.city.json`.
+> From `/input/city.city.json`, extract only Building and BuildingPart objects intersecting bbox `[85000, 446000, 86000, 447000]`, keep LoD 2.2, reproject to EPSG:28992, validate the result, then return it with `cityjson_download` as `extract.city.json`.
 
 Expected tools: `cityjson_open` → `cityjson_subset` → `cityjson_filter_lod` → `cityjson_reproject` → `cityjson_validate` → `cityjson_save`.
 
 ### CityGML interoperability
 
-> Convert `/data/source.gml` to CityJSON, inspect the resulting object types and LoDs, validate it with cjval and val3dity, and report any information that may have been lost or normalized during conversion.
+> Convert `/input/source.gml` to CityJSON, inspect the resulting object types and LoDs, validate it with cjval and val3dity, and report any information that may have been lost or normalized during conversion.
 
 Expected tools: `citygml_to_cityjson` → `cityjson_info` → `cityjson_validate`, plus specification lookup when useful.
 
 ### Database workflow
 
-> Open `/data/municipality.city.json`, validate it, then import it into PostgreSQL host `localhost`, database `cityjson`, schema `municipality`. Add an attribute index for `yearOfConstruction`. Use the database password from the MCP process environment.
+> Open `/input/municipality.city.json`, validate it, then import it into PostgreSQL host `localhost`, database `cityjson`, schema `municipality`. Add an attribute index for `yearOfConstruction`. Use the database password from the MCP process environment.
 
 Expected tools: `cityjson_open` → `cityjson_validate_schema` → `cityjson_db_import`.
 
@@ -881,6 +936,24 @@ docker build -f docker/Dockerfile -t cityjson-mcp .
 ```
 
 Run `docker run --rm --entrypoint node cityjson-mcp /app/scripts/doctor.mjs` after a local build to verify all five executables.
+
+## Publish from GitHub Actions
+
+The workflow in [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) builds `linux/amd64` and `linux/arm64` images on native runners, creates one multiplatform manifest, and pushes it to `yarroudh/cityjson-mcp`.
+
+Configure the GitHub repository under **Settings → Secrets and variables → Actions**:
+
+- Variable `DOCKERHUB_USERNAME`: `yarroudh`
+- Secret `DOCKERHUB_TOKEN`: a Docker Hub access token with permission to write this repository
+
+Run the workflow manually from the **Actions** tab, or publish a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+A version tag publishes `0.1.0`, `0.1`, and `latest`. BuildKit cache is retained for later runs, so unchanged `val3dity` and `cjval` layers do not need to compile again.
 
 Development PostGIS:
 

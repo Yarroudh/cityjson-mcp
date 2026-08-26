@@ -42,14 +42,16 @@ export function registerTools(server, deps) {
   })));
 
   server.registerTool('cityjson_open', {
-    title: 'Open CityJSON',
-    description: 'Open a CityJSON file and return an immutable dataset handle plus a structural summary. The path must be inside CITYJSON_MCP_ALLOWED_ROOTS.',
-    inputSchema: z.object({ source: z.string().min(1) })
+    title: 'Open CityJSON from a Docker mount',
+    description: 'Open a CityJSON file that already exists inside the MCP Docker container. Use this only for paths explicitly mounted at /data. Never use this tool for chat attachments, /mnt/user-data paths, /home/claude paths, or other client paths; use cityjson_upload for those files.',
+    inputSchema: z.object({
+      source: z.string().min(1).describe('Path inside the Docker /data mount. This cannot be a path from a chat attachment.')
+    })
   }, safe(async ({ source }) => jsonResult(await dm.open(source))));
 
   server.registerTool('cityjson_upload', {
-    title: 'Upload CityJSON content',
-    description: 'Import complete CityJSON JSON text supplied by the client into the managed workspace and return an immutable dataset handle. Use this for attachments that do not have a path inside the Docker /data mount.',
+    title: 'Import an attached CityJSON file',
+    description: 'Import a CityJSON chat attachment into the managed workspace and return an immutable dataset handle. Read the attachment through the client, then pass its complete JSON text in content. Always use this tool instead of cityjson_open for chat attachments and client paths such as /mnt/user-data or /home/claude.',
     inputSchema: z.object({
       content: z.string().min(2).describe('Complete UTF-8 CityJSON document as JSON text.'),
       filename: z.string().min(1).max(200).default('upload.city.json').describe('Display filename used for the managed workspace copy.')

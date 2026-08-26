@@ -12,10 +12,10 @@
     "test": "node --test",
     "render:diagrams": "python3 scripts/render_diagrams.py",
     "doctor": "node scripts/doctor.mjs",
-    "docker:build": "docker build -f docker/Dockerfile -t cityjson-toolbox-mcp .",
-    "docker:cache:val3dity": "docker build -f docker/Dockerfile --target val3dity-builder -t cityjson-toolbox-val3dity-builder .",
-    "docker:cache:cjval": "docker build -f docker/Dockerfile --target cjval-builder -t cityjson-toolbox-cjval-builder .",
-    "docker:doctor": "docker run --rm --entrypoint node cityjson-toolbox-mcp /app/scripts/doctor.mjs"
+    "docker:build": "docker build -f docker/Dockerfile -t cityjson-mcp .",
+    "docker:cache:val3dity": "docker build -f docker/Dockerfile --target val3dity-builder -t cityjson-mcp-val3dity-builder .",
+    "docker:cache:cjval": "docker build -f docker/Dockerfile --target cjval-builder -t cityjson-mcp-cjval-builder .",
+    "docker:doctor": "docker run --rm --entrypoint node cityjson-mcp /app/scripts/doctor.mjs"
   },
   "engines": {
     "node": ">=20"

@@ -1,15 +1,19 @@
 flowchart LR
   CLAUDE["Claude Desktop<br/>claude_desktop_config.json"]
+  CLAUDECODE["Claude Code<br/>.mcp.json"]
   CURSOR["Cursor<br/>.cursor/mcp.json"]
   VSCODE["VS Code<br/>.vscode/mcp.json"]
-  NODE["node src/index.mjs<br/>MCP stdio"]
-  ROOTS["CITYJSON_MCP_ALLOWED_ROOTS<br/>authorized data folders"]
-  WS["CITYJSON_MCP_WORKSPACE<br/>derived datasets/reports"]
-  TOOLS["Optional backend executables<br/>cjio · cjval · val3dity · citygml-tools · cjdb"]
+  DOCKER["CityJSON MCP Docker image<br/>MCP stdio"]
+  INPUT["Mounted files<br/>/input"]
+  UPLOAD["Small JSON content<br/>cityjson_upload"]
+  WS["Managed workspace<br/>/data"]
+  TOOLS["Bundled backends<br/>cjio · cjval · val3dity · citygml-tools · cjdb"]
 
-  CLAUDE --> NODE
-  CURSOR --> NODE
-  VSCODE --> NODE
-  NODE --> ROOTS
-  NODE --> WS
-  NODE --> TOOLS
+  CLAUDE --> DOCKER
+  CLAUDECODE --> DOCKER
+  CURSOR --> DOCKER
+  VSCODE --> DOCKER
+  INPUT --> DOCKER
+  UPLOAD --> DOCKER
+  DOCKER --> WS
+  DOCKER --> TOOLS

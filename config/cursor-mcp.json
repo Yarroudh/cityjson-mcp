@@ -1,13 +1,13 @@
 {
   "mcpServers": {
-    "cityjson-toolbox": {
+    "cityjson": {
       "type": "stdio",
       "command": "docker",
       "args": [
         "run",
         "--rm",
         "-i",
-        "cityjson-toolbox-mcp"
+        "yarroudh/cityjson-mcp:latest"
       ]
     }
   }

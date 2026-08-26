@@ -30,7 +30,7 @@ export function createServer() {
   const server = new McpServer(
     { name: 'cityjson-toolbox-mcp', version: '0.1.0' },
     { instructions: [
-      'Use cityjson_open for mounted files or cityjson_upload for content/attachments before tools that require dataset_id.',
+      'For every chat attachment, call cityjson_upload with the complete JSON text. Never pass an attachment path to cityjson_open because paths such as /mnt/user-data and /home/claude are not visible inside the Docker container. Use cityjson_open only when the user explicitly provides a path mounted inside Docker at /data.',
       'Use cityjson_download to return an opened or transformed model to the client when no host directory is mounted.',
       'Transformations are immutable: they return a new dataset_id and keep the source unchanged.',
       'Use cityjson_backend_status when an external backend is unavailable.',
@@ -62,4 +62,6 @@ export function createServer() {
   return server;
 }
 
-serveStdio(() => createServer());
+serveStdio(() => createServer(), {
+  onerror: error => console.error('[cityjson-mcp]', error)
+});

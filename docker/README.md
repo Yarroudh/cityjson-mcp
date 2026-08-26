@@ -1,15 +1,15 @@
-# Docker notes
+# Docker
 
 `Dockerfile` builds the complete MCP runtime with `cjio`, `cjdb`, `cjval`, `val3dity`, and `citygml-tools`. Users only need Docker Desktop; Python, Rust, Java, CGAL, and the backend CLIs stay inside the image.
 
-Build:
+Pull the published image:
 
 ```bash
-docker build -f docker/Dockerfile -t cityjson-toolbox-mcp .
-npm run docker:doctor
+docker pull yarroudh/cityjson-mcp:latest
+docker run --rm --entrypoint node yarroudh/cityjson-mcp:latest /app/scripts/doctor.mjs
 ```
 
-To ensure the two slow compiler stages are safely cached before the rest of the image is attempted:
+For a source build, cache the two slow compiler stages before building the rest:
 
 ```bash
 npm run docker:cache:val3dity
@@ -17,34 +17,45 @@ npm run docker:cache:cjval
 npm run docker:build
 ```
 
-The full build also has a cache barrier: Python, Java, and application layers do not start until both compiler stages have completed and been committed to Docker's cache.
+The full build has a cache barrier. Python, Java, and application layers do not start until both compiler stages have completed and entered Docker's cache. If a later layer fails, rerun `npm run docker:build`; Docker reuses the compiler layers.
 
 Both compiler stages use four jobs by default. Override either value when needed:
 
 ```bash
 docker build -f docker/Dockerfile --target val3dity-builder \
   --build-arg VAL3DITY_BUILD_JOBS=6 \
-  -t cityjson-toolbox-val3dity-builder .
+  -t cityjson-mcp-val3dity-builder .
 
 docker build -f docker/Dockerfile --target cjval-builder \
   --build-arg CJVAL_BUILD_JOBS=6 \
-  -t cityjson-toolbox-cjval-builder .
+  -t cityjson-mcp-cjval-builder .
 ```
 
-Claude Desktop can launch it directly over stdio (replace the host data path):
+Claude Desktop can launch the published image over stdio. Replace the source path with the absolute directory containing the CityJSON files:
 
 ```json
 {
   "mcpServers": {
     "cityjson": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "-v", "/absolute/path/to/citydata:/data", "cityjson-toolbox-mcp"]
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--mount",
+        "type=bind,source=/absolute/path/to/cityjson-files,target=/input,readonly",
+        "--env",
+        "CITYJSON_MCP_ALLOWED_ROOTS=/input:/data",
+        "yarroudh/cityjson-mcp:latest"
+      ]
     }
   }
 }
 ```
 
-Use `/data/...` paths in MCP calls.
+Use `/input/...` paths with `cityjson_open`. The mount is read only. Derived datasets and reports are written to `/data` inside Docker. Use `cityjson_download` to return a result to the client.
+
+Small attachments can instead use `cityjson_upload`, which sends the complete JSON document through an MCP argument. Large files should use the mount because client message limits can be much smaller than the server's upload limit. Chat paths such as `/mnt/user-data/...` do not exist inside this container.
 
 A local PostGIS development database for `cjdb` is available with:
 
