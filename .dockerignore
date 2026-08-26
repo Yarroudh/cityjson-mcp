@@ -1,6 +1,7 @@
 node_modules
 .backends
 .cityjson-mcp-workspace
+input
 .git
 .env
 *.log

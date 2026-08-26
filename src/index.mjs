@@ -30,7 +30,9 @@ export function createServer() {
   const server = new McpServer(
     { name: 'cityjson-toolbox-mcp', version: '0.1.0' },
     { instructions: [
-      'For every chat attachment, call cityjson_upload with the complete JSON text. Never pass an attachment path to cityjson_open because paths such as /mnt/user-data and /home/claude are not visible inside the Docker container. Use cityjson_open only when the user explicitly provides a path mounted inside Docker at /data.',
+      'For files placed in the configured input inbox by a host application or mounted folder, call cityjson_import with the filename only. Use cityjson_list_imports when the filename is unknown. Never ask users for absolute paths.',
+      'Use cityjson_import_text only for small JSON documents already present as text in an application workflow. Never put a normal or large attachment into an MCP argument. cityjson_upload is a deprecated compatibility alias.',
+      'Use cityjson_open only for advanced workflows where the user explicitly provides a server-visible path inside an allowed root.',
       'Use cityjson_download to return an opened or transformed model to the client when no host directory is mounted.',
       'Transformations are immutable: they return a new dataset_id and keep the source unchanged.',
       'Use cityjson_backend_status when an external backend is unavailable.',

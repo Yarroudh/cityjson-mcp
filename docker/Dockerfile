@@ -63,10 +63,14 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 COPY src ./src
+COPY web ./web
 COPY resources ./resources
 COPY scripts/doctor.mjs ./scripts/doctor.mjs
 
 ENV CITYJSON_MCP_ALLOWED_ROOTS=/data \
+    CITYJSON_MCP_INPUT=/input \
     CITYJSON_MCP_WORKSPACE=/data/.cityjson-mcp-workspace
-VOLUME ["/data"]
+RUN mkdir -p /input /data
+VOLUME ["/input", "/data"]
+EXPOSE 3000
 ENTRYPOINT ["node", "/app/src/index.mjs"]

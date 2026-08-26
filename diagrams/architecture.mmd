@@ -1,5 +1,9 @@
 flowchart LR
   CLIENT["MCP clients<br/>Claude Desktop · Cursor · VS Code"]
+  BROWSER["One-page chat<br/>browser + attachments"]
+  CHAT["Chat host<br/>model API + MCP client"]
+  MODEL["Tool-capable model<br/>Anthropic · OpenAI"]
+  INPUT["Input inbox<br/>streamed CityJSON files"]
   SERVER["Docker container<br/>CityJSON MCP · stdio server"]
   CORE["Dataset manager<br/>immutable handles + path policy"]
   NATIVE["Native inspection/query<br/>JSON + CityObjects + bbox"]
@@ -11,6 +15,11 @@ flowchart LR
   KNOW["CityJSON 2.0.2 references<br/>spec + schemas + extensions"]
 
   CLIENT -->|MCP stdio| SERVER
+  BROWSER --> CHAT
+  BROWSER -->|file stream| INPUT
+  CHAT --> MODEL
+  CHAT -->|MCP stdio| SERVER
+  INPUT --> CORE
   SERVER --> CORE
   CORE --> NATIVE
   CORE --> CJIO

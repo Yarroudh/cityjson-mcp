@@ -46,6 +46,8 @@ Claude Desktop can launch the published image over stdio. Replace the source pat
         "type=bind,source=/absolute/path/to/cityjson-files,target=/input,readonly",
         "--env",
         "CITYJSON_MCP_ALLOWED_ROOTS=/input:/data",
+        "--env",
+        "CITYJSON_MCP_INPUT=/input",
         "yarroudh/cityjson-mcp:latest"
       ]
     }
@@ -53,9 +55,17 @@ Claude Desktop can launch the published image over stdio. Replace the source pat
 }
 ```
 
-Use `/input/...` paths with `cityjson_open`. The mount is read only. Derived datasets and reports are written to `/data` inside Docker. Use `cityjson_download` to return a result to the client.
+Use inbox filenames with `cityjson_import`; `cityjson_list_imports` discovers them without exposing absolute paths. The mount is read only. Derived datasets and reports are written to `/data` inside Docker. Use `cityjson_download` to return a result to the client.
 
-Small attachments can instead use `cityjson_upload`, which sends the complete JSON document through an MCP argument. Large files should use the mount because client message limits can be much smaller than the server's upload limit. Chat paths such as `/mnt/user-data/...` do not exist inside this container.
+`cityjson_import_text` is available only for small JSON documents already present as text; its deprecated `cityjson_upload` alias is not a real attachment upload. Chat paths such as `/mnt/user-data/...` do not exist inside this container.
+
+For direct browser attachments, configure `MODEL_PROVIDER`, `MODEL_NAME`, and `MODEL_API_KEY` in the repository `.env`, then start the included one-page chat application:
+
+```bash
+npm run chat
+```
+
+Open <http://127.0.0.1:3000>. The application streams attachments into `/input`, calls `cityjson_import` over MCP, and sends only the returned dataset handle to the model.
 
 A local PostGIS development database for `cjdb` is available with:
 

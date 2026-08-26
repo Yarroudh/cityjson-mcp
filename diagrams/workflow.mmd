@@ -1,6 +1,6 @@
 flowchart TD
   START["User asks about a CityJSON file"]
-  OPEN["cityjson_open<br/>returns dataset_id"]
+  IMPORT["cityjson_import<br/>returns dataset_id"]
   INSPECT["Inspect/query<br/>info · list_objects · get_object · query"]
   VALIDATE["Validate<br/>cjval + val3dity"]
   TRANSFORM["Transform<br/>subset · LoD · CRS · clean · triangulate · merge"]
@@ -8,10 +8,10 @@ flowchart TD
   OUTPUT["Output<br/>save · export · CityGML · cjdb"]
   KNOW["Need semantics?<br/>spec · schema · extensions"]
 
-  START --> OPEN
-  OPEN --> INSPECT
-  OPEN --> VALIDATE
-  OPEN --> TRANSFORM
+  START --> IMPORT
+  IMPORT --> INSPECT
+  IMPORT --> VALIDATE
+  IMPORT --> TRANSFORM
   TRANSFORM --> DERIVED
   DERIVED --> VALIDATE
   DERIVED --> OUTPUT

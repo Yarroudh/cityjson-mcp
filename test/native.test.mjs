@@ -67,3 +67,27 @@ test('rejects invalid uploaded content before writing a file', async t => {
   await assert.rejects(() => dm.importContent('{"type":"not-cityjson"}'), /Expected root type CityJSON/);
   assert.deepEqual(await fs.readdir(workspace), []);
 });
+
+test('lists and imports a CityJSON file from the configured inbox by filename', async t => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cityjson-inbox-test-'));
+  const input = path.join(rootDir, 'input');
+  const workspace = path.join(rootDir, 'workspace');
+  await fs.mkdir(input);
+  await fs.mkdir(workspace);
+  t.after(() => fs.rm(rootDir, { recursive: true, force: true }));
+  await fs.copyFile(samplePath, path.join(input, 'city.city.json'));
+  const dm = new DatasetManager({
+    input,
+    workspace,
+    inputPath: filename => path.join(input, filename),
+    workspacePath: name => path.join(workspace, name)
+  });
+
+  const available = await dm.listImports();
+  assert.equal(available.count, 1);
+  assert.equal(available.files[0].filename, 'city.city.json');
+  const imported = await dm.importFile('city.city.json');
+  assert.equal(imported.operation, 'import');
+  assert.equal(imported.cityObjectCount, 2);
+  assert.equal(path.dirname(dm.get(imported.datasetId).path), workspace);
+});

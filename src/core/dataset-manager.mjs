@@ -20,6 +20,53 @@ export class DatasetManager {
     return { datasetId: id, path: filePath, sizeBytes: stat.size, ...summarizeCityJSON(json) };
   }
 
+  async listImports() {
+    const entries = await fs.readdir(this.pathPolicy.input, { withFileTypes: true });
+    const files = await Promise.all(entries
+      .filter(entry => entry.isFile() && /\.json$/i.test(entry.name))
+      .map(async entry => {
+        const stat = await fs.stat(path.join(this.pathPolicy.input, entry.name));
+        return { filename: entry.name, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() };
+      }));
+    files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt) || a.filename.localeCompare(b.filename));
+    return { input: this.pathPolicy.input, count: files.length, files };
+  }
+
+  async importFile(requestedFilename) {
+    let filename = requestedFilename;
+    if (!filename) {
+      const available = await this.listImports();
+      if (available.files.length === 0) throw new Error('No JSON files are available in the configured input inbox');
+      if (available.files.length > 1) {
+        throw new Error(`More than one input file is available; choose filename explicitly: ${available.files.map(file => file.filename).join(', ')}`);
+      }
+      filename = available.files[0].filename;
+    }
+
+    const source = this.pathPolicy.inputPath(filename);
+    const safeName = path.basename(filename).replace(/[^A-Za-z0-9._-]/g, '_');
+    const filePath = this.pathPolicy.workspacePath(`import-${crypto.randomUUID().slice(0, 8)}-${safeName}`);
+    await fs.copyFile(source, filePath, fs.constants.COPYFILE_EXCL);
+    try {
+      const json = await readCityJSON(filePath);
+      const stat = await fs.stat(filePath);
+      const id = this.id();
+      this.datasets.set(id, {
+        id,
+        path: filePath,
+        filename: safeName,
+        createdAt: new Date().toISOString(),
+        original: true,
+        operation: 'import',
+        sourceFilename: filename
+      });
+      return { datasetId: id, filename, sizeBytes: stat.size, operation: 'import', ...summarizeCityJSON(json) };
+    } catch (error) {
+      await fs.rm(filePath, { force: true });
+      throw error;
+    }
+  }
+
   async importContent(content, filename = 'upload.city.json') {
     const maxBytes = Number(process.env.CITYJSON_MCP_MAX_UPLOAD_BYTES || 25 * 1024 * 1024);
     const sizeBytes = Buffer.byteLength(content, 'utf8');

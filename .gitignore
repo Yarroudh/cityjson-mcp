@@ -1,6 +1,7 @@
 node_modules/
 .backends/
 .cityjson-mcp-workspace/
+input/
 .env
 *.log
 .DS_Store

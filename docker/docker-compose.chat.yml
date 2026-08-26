@@ -1,0 +1,23 @@
+services:
+  cityjson-chat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: yarroudh/cityjson-mcp:latest
+    entrypoint: ["node", "/app/src/web/server.mjs"]
+    env_file:
+      - ../.env
+    environment:
+      CHAT_HOST: 0.0.0.0
+      CITYJSON_MCP_INPUT: /input
+      CITYJSON_MCP_WORKSPACE: /data/.cityjson-mcp-workspace
+      CITYJSON_MCP_ALLOWED_ROOTS: /data
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - cityjson-input:/input
+      - cityjson-data:/data
+
+volumes:
+  cityjson-input:
+  cityjson-data:

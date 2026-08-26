@@ -3,9 +3,10 @@ flowchart LR
   CLAUDECODE["Claude Code<br/>.mcp.json"]
   CURSOR["Cursor<br/>.cursor/mcp.json"]
   VSCODE["VS Code<br/>.vscode/mcp.json"]
+  WEB["CityJSON chat<br/>browser"]
+  HOST["Chat host<br/>model + MCP client"]
   DOCKER["CityJSON MCP Docker image<br/>MCP stdio"]
-  INPUT["Mounted files<br/>/input"]
-  UPLOAD["Small JSON content<br/>cityjson_upload"]
+  INPUT["Input inbox<br/>/input"]
   WS["Managed workspace<br/>/data"]
   TOOLS["Bundled backends<br/>cjio · cjval · val3dity · citygml-tools · cjdb"]
 
@@ -13,7 +14,9 @@ flowchart LR
   CLAUDECODE --> DOCKER
   CURSOR --> DOCKER
   VSCODE --> DOCKER
+  WEB -->|stream attachments| INPUT
+  WEB --> HOST
+  HOST --> DOCKER
   INPUT --> DOCKER
-  UPLOAD --> DOCKER
   DOCKER --> WS
   DOCKER --> TOOLS

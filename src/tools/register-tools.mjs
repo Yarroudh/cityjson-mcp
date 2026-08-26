@@ -2,7 +2,7 @@ import * as z from 'zod/v4';
 import { jsonResult, errorResult } from '../util/mcp-result.mjs';
 import { queryCityObjects, objectBBox } from '../core/cityjson-native.mjs';
 
-const datasetId = z.string().min(3).describe('Dataset handle returned by cityjson_open, cityjson_upload, or another transformation tool.');
+const datasetId = z.string().min(3).describe('Dataset handle returned by cityjson_import, cityjson_open, cityjson_import_text, or another transformation tool.');
 const bbox = z.tuple([z.number(), z.number(), z.number(), z.number()]).describe('2D bbox [minX, minY, maxX, maxY] in the dataset CRS.');
 const dbConnection = z.object({
   host: z.string().min(1),
@@ -43,15 +43,38 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_open', {
     title: 'Open CityJSON from a Docker mount',
-    description: 'Open a CityJSON file that already exists inside the MCP Docker container. Use this only for paths explicitly mounted at /data. Never use this tool for chat attachments, /mnt/user-data paths, /home/claude paths, or other client paths; use cityjson_upload for those files.',
+    description: 'Open a CityJSON file by a full server-visible path inside an allowed root. This is an advanced path-based operation. For files delivered to the configured input inbox, use cityjson_import with a filename instead.',
     inputSchema: z.object({
-      source: z.string().min(1).describe('Path inside the Docker /data mount. This cannot be a path from a chat attachment.')
+      source: z.string().min(1).describe('Full server-visible path inside an allowed root. This cannot be a path from a chat attachment.')
     })
   }, safe(async ({ source }) => jsonResult(await dm.open(source))));
 
+  server.registerTool('cityjson_list_imports', {
+    title: 'List CityJSON input files',
+    description: 'List JSON files in the configured input inbox. Use this when the user did not name an attached/imported file or when cityjson_import reports multiple candidates. Returns filenames only; never ask the user for an absolute path.',
+    inputSchema: z.object({})
+  }, safe(async () => jsonResult(await dm.listImports())));
+
+  server.registerTool('cityjson_import', {
+    title: 'Import CityJSON from the input inbox',
+    description: 'Import a CityJSON file already placed in the configured input inbox and return an immutable dataset handle. Pass only its filename, never an absolute path. If filename is omitted, the import succeeds only when the inbox contains exactly one JSON file.',
+    inputSchema: z.object({
+      filename: z.string().min(1).max(255).optional().describe('Filename shown by cityjson_list_imports or supplied by the chat application attachment metadata.')
+    })
+  }, safe(async ({ filename }) => jsonResult(await dm.importFile(filename))));
+
+  server.registerTool('cityjson_import_text', {
+    title: 'Import a small CityJSON text document',
+    description: 'Fallback for small programmatically supplied CityJSON documents only. The complete JSON travels through the MCP request, so never use it for normal chat attachments or large models; use cityjson_import instead.',
+    inputSchema: z.object({
+      content: z.string().min(2).describe('Complete UTF-8 CityJSON document as JSON text.'),
+      filename: z.string().min(1).max(200).default('import.city.json').describe('Display filename used for the managed workspace copy.')
+    })
+  }, safe(async ({ content, filename }) => jsonResult(await dm.importContent(content, filename))));
+
   server.registerTool('cityjson_upload', {
-    title: 'Import an attached CityJSON file',
-    description: 'Import a CityJSON chat attachment into the managed workspace and return an immutable dataset handle. Read the attachment through the client, then pass its complete JSON text in content. Always use this tool instead of cityjson_open for chat attachments and client paths such as /mnt/user-data or /home/claude.',
+    title: 'Import small CityJSON text (legacy)',
+    description: 'Deprecated compatibility alias for cityjson_import_text. This is not a binary file upload and must not be used for normal attachments or large models.',
     inputSchema: z.object({
       content: z.string().min(2).describe('Complete UTF-8 CityJSON document as JSON text.'),
       filename: z.string().min(1).max(200).default('upload.city.json').describe('Display filename used for the managed workspace copy.')

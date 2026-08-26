@@ -11,7 +11,7 @@ It gives MCP clients such as Claude Desktop, Cursor and VS Code a stable CityJSO
 - **cjdb + PostgreSQL/PostGIS** — persistent CityJSON storage/import/export.
 - **CityJSON 2.0.2 specification, JSON Schemas and Extensions registry** — live canonical reference access for the agent.
 
-The server exposes **35 MCP tools**. Transformations use **immutable dataset handles**: an operation such as `cityjson_subset` returns a new `dataset_id` and does not overwrite the source dataset.
+The server exposes **38 MCP tools**. Transformations use **immutable dataset handles**: an operation such as `cityjson_subset` returns a new `dataset_id` and does not overwrite the source dataset. An optional one-page chat host streams browser attachments into the MCP input inbox and sends only dataset handles to the configured model.
 
 > Status: this is a practical v0.1 implementation. The recommended Docker image bundles every external backend; development without Docker still requires installing the individual commands.
 
@@ -20,6 +20,10 @@ The server exposes **35 MCP tools**. Transformations use **immutable dataset han
 ```mermaid
 flowchart LR
   CLIENT["MCP clients<br/>Claude Desktop · Cursor · VS Code"]
+  BROWSER["One-page chat<br/>browser + attachments"]
+  CHAT["Chat host<br/>model API + MCP client"]
+  MODEL["Tool-capable model<br/>Anthropic · OpenAI"]
+  INPUT["Input inbox<br/>streamed CityJSON files"]
   SERVER["Docker container<br/>CityJSON MCP · stdio server"]
   CORE["Dataset manager<br/>immutable handles + path policy"]
   NATIVE["Native inspection/query<br/>JSON + CityObjects + bbox"]
@@ -31,6 +35,11 @@ flowchart LR
   KNOW["CityJSON 2.0.2 references<br/>spec + schemas + extensions"]
 
   CLIENT -->|MCP stdio| SERVER
+  BROWSER --> CHAT
+  BROWSER -->|file stream| INPUT
+  CHAT --> MODEL
+  CHAT -->|MCP stdio| SERVER
+  INPUT --> CORE
   SERVER --> CORE
   CORE --> NATIVE
   CORE --> CJIO
@@ -50,7 +59,7 @@ The MCP-facing API deliberately does **not** expose arbitrary shell commands suc
 ```mermaid
 flowchart TD
   START["User asks about a CityJSON file"]
-  OPEN["cityjson_open<br/>returns dataset_id"]
+  IMPORT["cityjson_import<br/>returns dataset_id"]
   INSPECT["Inspect/query<br/>info · list_objects · get_object · query"]
   VALIDATE["Validate<br/>cjval + val3dity"]
   TRANSFORM["Transform<br/>subset · LoD · CRS · clean · triangulate · merge"]
@@ -58,10 +67,10 @@ flowchart TD
   OUTPUT["Output<br/>save · export · CityGML · cjdb"]
   KNOW["Need semantics?<br/>spec · schema · extensions"]
 
-  START --> OPEN
-  OPEN --> INSPECT
-  OPEN --> VALIDATE
-  OPEN --> TRANSFORM
+  START --> IMPORT
+  IMPORT --> INSPECT
+  IMPORT --> VALIDATE
+  IMPORT --> TRANSFORM
   TRANSFORM --> DERIVED
   DERIVED --> VALIDATE
   DERIVED --> OUTPUT
@@ -75,11 +84,11 @@ flowchart TD
 
 A user can say, for example:
 
-> Open `/input/rotterdam.city.json`, validate both its CityJSON structure and 3D geometry, keep only Buildings inside bbox `[90000, 435000, 91000, 436000]`, reproject the result to EPSG:28992, clean duplicate and orphan vertices, validate the result again, and return it with `cityjson_download`.
+> Import `rotterdam.city.json`, validate both its CityJSON structure and 3D geometry, keep only Buildings inside bbox `[90000, 435000, 91000, 436000]`, reproject the result to EPSG:28992, clean duplicate and orphan vertices, validate the result again, and return it with `cityjson_download`.
 
 An MCP client can resolve that request approximately as:
 
-1. `cityjson_open`
+1. `cityjson_import`
 2. `cityjson_validate`
 3. `cityjson_subset`
 4. `cityjson_reproject`
@@ -93,7 +102,51 @@ Each transformation returns a new `dataset_id`, so intermediate states remain av
 
 # Quick start
 
-## Recommended: complete Docker runtime
+## DATUM one-page chat with direct attachments
+
+The included DATUM chat application is the simplest attachment workflow. It streams each browser attachment to `CITYJSON_MCP_INPUT`, imports it through the live MCP server, and gives the model only the resulting `dataset_id` and summary.
+
+Create a local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Select the API style, then set a tool-capable model ID, its key, and its base URL. For example, DeepSeek uses the OpenAI-compatible style:
+
+```dotenv
+MODEL_PROVIDER=openai
+MODEL_NAME=deepseek-v4-pro
+MODEL_API_KEY=your-api-key
+MODEL_BASE_URL=https://api.deepseek.com
+```
+
+`MODEL_PROVIDER` deliberately accepts `anthropic` or `openai` because it selects the API protocol, not the company serving the model. `anthropic` uses Messages; `openai` uses OpenAI-compatible Chat Completions and therefore also supports compatible services such as DeepSeek through `MODEL_BASE_URL`. The key is used only by the server and is never returned to the browser or passed to an MCP tool.
+
+Run the complete application. This is the default because the image contains `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`:
+
+```bash
+npm install
+npm run chat
+```
+
+Then open <http://127.0.0.1:3000>. Attaching a file performs this sequence automatically:
+
+```text
+browser multipart stream → input inbox → cityjson_import → dataset_id → model tool loop
+```
+
+`npm run chat` is equivalent to:
+
+```bash
+docker compose -f docker/docker-compose.chat.yml up --build
+```
+
+The Compose configuration binds the application only to `127.0.0.1`, keeps input/workspace data in Docker volumes, and reads the model configuration from `.env`.
+
+For development on a host where all five executables are already installed, use `npm run chat:host`. Host mode performs a backend readiness check and refuses to advertise a non-functional toolbox. `CHAT_ALLOW_PARTIAL_BACKENDS=true` overrides that check only for deliberate inspection-only development.
+
+## Standalone MCP clients with the complete Docker runtime
 
 The Docker image contains the MCP server and all five backends. Install Docker Desktop, then pull the image from Docker Hub:
 
@@ -109,24 +162,9 @@ docker run --rm --entrypoint node yarroudh/cityjson-mcp:latest /app/scripts/doct
 
 The output should report `OK` for `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`.
 
-### Choose how files enter the container
+### Configure an input inbox
 
-For small files, the client can read the attachment and send its JSON text to `cityjson_upload`:
-
-```json
-{
-  "mcpServers": {
-    "cityjson": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i", "yarroudh/cityjson-mcp:latest"]
-    }
-  }
-}
-```
-
-This method passes the complete document through an MCP argument. Although the server accepts uploads up to 25 MiB by default, the client or model can have a much smaller practical message limit. Do not use this method for large CityJSON models.
-
-For large files, mount their host directory. Replace `/absolute/path/to/cityjson-files` with a real absolute path:
+MCP itself does not transfer ordinary chat attachments. For Claude Desktop and other standalone clients, mount a host directory once. Replace `/absolute/path/to/cityjson-files` with a real absolute directory:
 
 ```json
 {
@@ -141,6 +179,8 @@ For large files, mount their host directory. Replace `/absolute/path/to/cityjson
         "type=bind,source=/absolute/path/to/cityjson-files,target=/input,readonly",
         "--env",
         "CITYJSON_MCP_ALLOWED_ROOTS=/input:/data",
+        "--env",
+        "CITYJSON_MCP_INPUT=/input",
         "yarroudh/cityjson-mcp:latest"
       ]
     }
@@ -148,9 +188,13 @@ For large files, mount their host directory. Replace `/absolute/path/to/cityjson
 }
 ```
 
-The host directory appears as `/input` inside Docker. For example, `/absolute/path/to/cityjson-files/model.city.json` becomes `/input/model.city.json`. The input mount cannot be modified. Derived datasets and reports go to Docker's managed `/data` workspace.
+The host directory appears as `/input` inside Docker. Users and agents refer only to the filename:
 
-Chat attachment paths such as `/mnt/user-data/...` and `/home/claude/...` belong to the client's private environment. They do not exist inside the MCP container and must never be passed to `cityjson_open`.
+> Import `model.city.json` and summarize it.
+
+The agent calls `cityjson_import({"filename":"model.city.json"})`. `cityjson_list_imports` can discover available filenames, and `cityjson_import` copies the selected source into the immutable managed workspace. The input mount cannot be modified.
+
+Chat attachment paths such as `/mnt/user-data/...` and `/home/claude/...` belong to the client's private environment. They do not exist inside the MCP container. `cityjson_import_text` remains available only for small programmatically supplied JSON text; `cityjson_upload` is its deprecated compatibility alias and is not a real file-upload channel.
 
 The image includes `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`; no host Python, Rust, Java, or geospatial libraries are required. Docker automatically pulls newer image layers when needed after you run `docker pull yarroudh/cityjson-mcp:latest` again.
 
@@ -258,6 +302,7 @@ macOS/Linux example:
 
 ```bash
 export CITYJSON_MCP_ALLOWED_ROOTS="/Users/me/citydata:/Volumes/3d-city-models"
+export CITYJSON_MCP_INPUT="/Users/me/citydata/input"
 export CITYJSON_MCP_WORKSPACE="/Users/me/citydata/.cityjson-mcp-workspace"
 ```
 
@@ -430,9 +475,10 @@ flowchart LR
   CLAUDECODE["Claude Code<br/>.mcp.json"]
   CURSOR["Cursor<br/>.cursor/mcp.json"]
   VSCODE["VS Code<br/>.vscode/mcp.json"]
+  WEB["CityJSON chat<br/>browser"]
+  HOST["Chat host<br/>model + MCP client"]
   DOCKER["CityJSON MCP Docker image<br/>MCP stdio"]
-  INPUT["Mounted files<br/>/input"]
-  UPLOAD["Small JSON content<br/>cityjson_upload"]
+  INPUT["Input inbox<br/>/input"]
   WS["Managed workspace<br/>/data"]
   TOOLS["Bundled backends<br/>cjio · cjval · val3dity · citygml-tools · cjdb"]
 
@@ -440,8 +486,10 @@ flowchart LR
   CLAUDECODE --> DOCKER
   CURSOR --> DOCKER
   VSCODE --> DOCKER
+  WEB -->|stream attachments| INPUT
+  WEB --> HOST
+  HOST --> DOCKER
   INPUT --> DOCKER
-  UPLOAD --> DOCKER
   DOCKER --> WS
   DOCKER --> TOOLS
 ```
@@ -457,27 +505,30 @@ flowchart LR
 | Tool | Backend | Purpose | Key inputs |
 |---|---|---|---|
 | `cityjson_backend_status` | native | Reports whether `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb` are callable; also returns path-policy settings. | none |
+| `cityjson_list_imports` | native | Lists JSON filenames available in the configured input inbox. | none |
+| `cityjson_import` | native | Imports an inbox file by filename and returns an immutable `dataset_id`. | optional `filename` |
+| `cityjson_import_text` | native | Small-text fallback for programmatic clients; content travels through MCP JSON. | `content`, optional `filename` |
 | `cityjson_open` | native | Opens a regular CityJSON JSON file and returns a `dataset_id` plus structural summary. | `source` |
-| `cityjson_upload` | native | Imports complete CityJSON JSON text from an attachment/client into the managed workspace. | `content`, optional `filename` |
+| `cityjson_upload` | native | Deprecated compatibility alias of `cityjson_import_text`; not a binary upload. | `content`, optional `filename` |
 | `cityjson_download` | native | Returns an opened or transformed model as an embedded JSON resource for saving/downloading. | `dataset_id`, optional `filename` |
 | `cityjson_info` | native | Summarizes type/version, object counts, LoDs, attributes, metadata, transform and extensions. | `dataset_id` |
 | `cityjson_save` | native | Copies an opened/derived dataset to an explicit authorized path. | `dataset_id`, `destination`, `overwrite` |
 
-### `cityjson_open`
+### `cityjson_import`
 
-Call this before tools requiring `dataset_id`:
+Use this for files delivered to the input inbox by the chat application or placed in a mounted directory:
 
 ```json
 {
-  "source": "/input/amsterdam.city.json"
+  "filename": "amsterdam.city.json"
 }
 ```
 
-`/input` is the recommended read only host mount. Paths from a chat attachment or the client's code environment are not visible inside Docker.
+If the filename is unknown, call `cityjson_list_imports`. Omitting `filename` imports automatically only when exactly one JSON file is present. The tool copies and validates the source before returning a handle.
 
-### `cityjson_upload`
+### `cityjson_import_text`
 
-Use this when a small attached CityJSON file is available to the client as content but not as a path inside Docker:
+Use this only when a small CityJSON document already exists as text in an application workflow:
 
 ```json
 {
@@ -486,7 +537,11 @@ Use this when a small attached CityJSON file is available to the client as conte
 }
 ```
 
-The content is structurally checked before it is written to the managed workspace. Uploads default to a 25 MiB server limit, but client message limits can be much smaller. Use a mounted `/input` directory for large models.
+The content is structurally checked before it is written to the managed workspace. It is not appropriate for browser/chat attachments because the complete document travels through the MCP request. `cityjson_upload` is retained as a deprecated alias for compatibility.
+
+### `cityjson_open`
+
+`cityjson_open` remains available for advanced clients that intentionally provide a full server-visible path inside an allowed root. Normal inbox and attachment workflows should use `cityjson_import`.
 
 ### `cityjson_download`
 
@@ -821,31 +876,31 @@ A future adapter could delegate `cityjson_spec_read` to `cj-mcp` without changin
 
 # Recommended prompts / recipes
 
-These prompts assume the host file directory is mounted at `/input`. They explicitly prevent the client from checking `/input` in its own code environment.
+These prompts assume the host file directory is configured as the input inbox. The agent uses filenames and never checks `/input` in its own code environment.
 
 ### Inspect before modifying
 
-> Call `cityjson_open` with `source` set to `/input/tile.city.json`. Do not use bash, Python, the code environment, attachment tools, or connector search. Tell me the CityJSON version, CRS, CityObject counts by type, LoDs, attribute names, and extensions. Do not modify anything.
+> Import `tile.city.json` with `cityjson_import`. Tell me the CityJSON version, CRS, CityObject counts by type, LoDs, attribute names, and extensions. Do not modify anything.
 
-Expected tools: `cityjson_open` → `cityjson_info`.
+Expected tools: `cityjson_import` → `cityjson_info`.
 
 ### Validate and diagnose
 
-> Open `/input/tile.city.json` with `cityjson_open`, then validate it with `cjval` and `val3dity`. Use only the CityJSON connector tools. Separate cjval warnings from errors, group val3dity errors by error code, identify the affected CityObject IDs, and consult the CityJSON specification when an error is about a CityJSON structural rule. If a validation report exceeds the tool output limit, create nonoverlapping spatial subsets, validate each subset, and aggregate the counts without double counting. Do not modify the original file.
+> Import `tile.city.json`, then validate it with `cjval` and `val3dity`. Use only the CityJSON connector tools. Separate cjval warnings from errors, group val3dity errors by error code, identify the affected CityObject IDs, and consult the CityJSON specification when an error is about a CityJSON structural rule. If a validation report exceeds the tool output limit, create nonoverlapping spatial subsets, validate each subset, and aggregate the counts without double counting. Do not modify the original file.
 
-Expected tools: `cityjson_open` → `cityjson_validate` → optionally `cityjson_get_object` / `cityjson_spec_read`.
+Expected tools: `cityjson_import` → `cityjson_validate` → optionally `cityjson_get_object` / `cityjson_spec_read`.
 
 ### Safe cleanup loop
 
-> Open `/input/tile.city.json`, run structural validation, and if the only structural warnings are duplicate or unused vertices, create a cleaned derived dataset, run full validation again, and return the result with `cityjson_download` as `tile-clean.city.json`. Never overwrite the original.
+> Import `tile.city.json`, run structural validation, and if the only structural warnings are duplicate or unused vertices, create a cleaned derived dataset, run full validation again, and return the result with `cityjson_download` as `tile-clean.city.json`. Never overwrite the original.
 
-Expected tools: `cityjson_open` → `cityjson_validate_schema` → `cityjson_clean_vertices` → `cityjson_validate` → `cityjson_save`.
+Expected tools: `cityjson_import` → `cityjson_validate_schema` → `cityjson_clean_vertices` → `cityjson_validate` → `cityjson_save`.
 
 ### Spatial extract
 
-> From `/input/city.city.json`, extract only Building and BuildingPart objects intersecting bbox `[85000, 446000, 86000, 447000]`, keep LoD 2.2, reproject to EPSG:28992, validate the result, then return it with `cityjson_download` as `extract.city.json`.
+> From inbox file `city.city.json`, extract only Building and BuildingPart objects intersecting bbox `[85000, 446000, 86000, 447000]`, keep LoD 2.2, reproject to EPSG:28992, validate the result, then return it with `cityjson_download` as `extract.city.json`.
 
-Expected tools: `cityjson_open` → `cityjson_subset` → `cityjson_filter_lod` → `cityjson_reproject` → `cityjson_validate` → `cityjson_save`.
+Expected tools: `cityjson_import` → `cityjson_subset` → `cityjson_filter_lod` → `cityjson_reproject` → `cityjson_validate` → `cityjson_save`.
 
 ### CityGML interoperability
 
@@ -855,9 +910,9 @@ Expected tools: `citygml_to_cityjson` → `cityjson_info` → `cityjson_validate
 
 ### Database workflow
 
-> Open `/input/municipality.city.json`, validate it, then import it into PostgreSQL host `localhost`, database `cityjson`, schema `municipality`. Add an attribute index for `yearOfConstruction`. Use the database password from the MCP process environment.
+> Import inbox file `municipality.city.json`, validate it, then import it into PostgreSQL host `localhost`, database `cityjson`, schema `municipality`. Add an attribute index for `yearOfConstruction`. Use the database password from the MCP process environment.
 
-Expected tools: `cityjson_open` → `cityjson_validate_schema` → `cityjson_db_import`.
+Expected tools: `cityjson_import` → `cityjson_validate_schema` → `cityjson_db_import`.
 
 ### Extension-aware reasoning
 
@@ -872,8 +927,9 @@ Expected tools: `cityjson_info` → `cityjson_extensions_registry` → `cityjson
 The key design is:
 
 ```text
-attached JSON ──cityjson_upload──> cj_A
-host file ─────cityjson_open────> cj_A
+browser attachment ──stream──> input inbox ──cityjson_import──> cj_A
+mounted inbox file ──────────────────────────cityjson_import──> cj_A
+authorized path ─────────────────────────────cityjson_open────> cj_A
                                   │
                                   ├── subset ───────> cj_B
                                   │                   │
@@ -882,8 +938,9 @@ host file ─────cityjson_open────> cj_A
                                   └── validate (does not modify data)
 ```
 
-- `cityjson_open` registers the original path.
-- `cityjson_upload` imports attached CityJSON text directly into the managed workspace and returns the initial dataset ID.
+- `cityjson_import` copies an inbox file into the managed workspace, validates it, and returns the initial dataset ID.
+- `cityjson_open` registers an explicitly authorized server-visible path for advanced workflows.
+- `cityjson_import_text` is a small-document fallback; its deprecated `cityjson_upload` alias does not handle binary attachments.
 - A transformation asks the backend to write a new file inside `CITYJSON_MCP_WORKSPACE`.
 - The server opens the produced file and gives it a new random `dataset_id`.
 - `cityjson_save` is the explicit step that copies a chosen state to a destination selected by the user.
@@ -898,7 +955,7 @@ This server executes powerful geospatial programs locally. Treat MCP server inst
 
 Built-in guardrails:
 
-1. **Allowed roots** — host-path operations must be within `CITYJSON_MCP_ALLOWED_ROOTS` or the managed workspace. Uploads are written directly to the managed workspace and do not require a host-path allowance.
+1. **Allowed roots** — host-path operations must be within `CITYJSON_MCP_ALLOWED_ROOTS`, `CITYJSON_MCP_INPUT`, or the managed workspace. Browser uploads are assigned randomized safe filenames inside the input directory.
 2. **No arbitrary shell tool** — there is no `run_shell` command or unrestricted `run_cjio` MCP tool.
 3. **No shell interpolation** — external programs are invoked with argument arrays and `shell: false`.
 4. **Typed tool schemas** — Zod restricts types, enums, EPSG integers, bbox shapes, database schema identifiers, etc.
