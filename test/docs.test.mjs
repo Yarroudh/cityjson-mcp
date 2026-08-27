@@ -5,23 +5,52 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const names = ['architecture', 'workflow', 'validation', 'client-setup'];
 
-test('README embeds each Mermaid diagram and links its PNG export', async () => {
+test('README presents Datum first and contains required setup sections', async () => {
   const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8');
-  for (const name of names) {
-    const source = (await fs.readFile(path.join(root, 'diagrams', `${name}.mmd`), 'utf8')).trim();
-    assert.ok(readme.includes(`\`\`\`mermaid\n${source}\n\`\`\``), `${name} Mermaid source must be embedded`);
-    assert.ok(readme.includes(`[Download PNG — high resolution](diagrams/${name}.png)`), `${name} PNG link must exist`);
+  assert.match(readme, /<img src="web\/favicon\.svg"/);
+  assert.match(readme, /img\.shields\.io/);
+  assert.match(readme, /## Quick start: Datum chat application/);
+  assert.match(readme, /cp \.env\.example \.env/);
+  for (const name of ['MODEL_PROVIDER', 'MODEL_NAME', 'MODEL_API_KEY', 'MODEL_BASE_URL']) {
+    assert.match(readme, new RegExp(`\\b${name}\\b`));
   }
+  assert.match(readme, /## Use the MCP server without Datum/);
+  assert.match(readme, /### Claude Desktop/);
+  assert.match(readme, /### Claude Code/);
+  assert.match(readme, /### Cursor/);
+  assert.match(readme, /### VS Code/);
+  assert.match(readme, /## Contributing/);
+  assert.match(readme, /## Next/);
+  assert.ok(readme.indexOf('## Quick start: Datum chat application') < readme.indexOf('## Use the MCP server without Datum'));
 });
 
-test('diagram PNGs are present and non-trivial high-resolution exports', async () => {
-  for (const name of names) {
-    const file = path.join(root, 'diagrams', `${name}.png`);
-    const stat = await fs.stat(file);
-    assert.ok(stat.size > 100_000, `${name}.png should be a substantial high-resolution image`);
-    const header = await fs.readFile(file);
-    assert.deepEqual([...header.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
-  }
+test('README does not contain diagram sections or embedded diagrams', async () => {
+  const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8');
+  assert.doesNotMatch(readme, /^#+\s+Diagrams?\s*$/im);
+  assert.doesNotMatch(readme, /```mermaid/);
+  assert.doesNotMatch(readme, /diagrams\//);
+});
+
+test('README lists every registered MCP tool', async () => {
+  const [readme, registration] = await Promise.all([
+    fs.readFile(path.join(root, 'README.md'), 'utf8'),
+    fs.readFile(path.join(root, 'src', 'tools', 'register-tools.mjs'), 'utf8')
+  ]);
+  const names = [...registration.matchAll(/server\.registerTool\('([^']+)'/g)].map(match => match[1]);
+  assert.equal(names.length, 38);
+  for (const name of names) assert.match(readme, new RegExp(`\\b${name}\\b`), `${name} must be documented`);
+});
+
+test('chat startup checks the local image before pulling and never builds automatically', async () => {
+  const [packageText, startup, compose] = await Promise.all([
+    fs.readFile(path.join(root, 'package.json'), 'utf8'),
+    fs.readFile(path.join(root, 'scripts', 'start-chat.mjs'), 'utf8'),
+    fs.readFile(path.join(root, 'docker', 'docker-compose.chat.yml'), 'utf8')
+  ]);
+  const packageJson = JSON.parse(packageText);
+  assert.equal(packageJson.scripts.chat, 'node scripts/start-chat.mjs');
+  assert.ok(startup.indexOf("['image', 'inspect', image]") < startup.indexOf("['pull', image]"));
+  assert.match(startup, /'--no-build'/);
+  assert.doesNotMatch(compose, /^\s+build:/m);
 });

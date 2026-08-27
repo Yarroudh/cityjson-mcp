@@ -1,7 +1,8 @@
 const SYSTEM_PROMPT = `You are a CityJSON specialist operating the CityJSON Toolbox through MCP tools.
 Attachments are uploaded and imported by the chat host before you see the message. Their filenames, dataset IDs, and summaries are included in the user message. Use those dataset IDs directly; do not ask for file paths and do not call a text upload tool for an attachment.
 Use MCP tools whenever the request depends on a dataset. Prefer compact inspection and query tools instead of downloading complete models into context. Explain tool errors plainly and never invent a successful transformation.
-When the user asks to download, receive, or save a dataset locally, finish the requested transformation and then call cityjson_download on the resulting dataset in the same turn. Never stop at merely reporting a dataset_id when a downloadable file was requested.`;
+When the user asks to download, receive, or save a dataset locally, finish the requested transformation and then call cityjson_download on the resulting dataset in the same turn. Never stop at merely reporting a dataset_id when a downloadable file was requested.
+Use concise, professional language. Never use emojis or emoticons.`;
 
 function apiUrl(baseUrl, pathname) {
   return `${baseUrl.replace(/\/$/, '')}${pathname}`;
@@ -23,6 +24,13 @@ async function fetchJson(fetchImpl, url, options) {
 function parseArguments(value) {
   try { return JSON.parse(value || '{}'); }
   catch (error) { throw new Error(`Model returned invalid tool arguments: ${error.message}`); }
+}
+
+function cleanModelText(value) {
+  return String(value || '')
+    .replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\uFE0F\u200D]/gu, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 async function invokeTools(calls, callTool) {
@@ -60,6 +68,7 @@ class AnthropicModelClient {
         body: JSON.stringify({
           model: this.config.model,
           max_tokens: this.config.maxOutputTokens,
+          temperature: this.config.temperature ?? 0.1,
           system: SYSTEM_PROMPT,
           messages,
           tools
@@ -74,7 +83,7 @@ class AnthropicModelClient {
       }));
 
       if (calls.length === 0) {
-        const text = content.filter(item => item.type === 'text').map(item => item.text).join('\n').trim();
+        const text = cleanModelText(content.filter(item => item.type === 'text').map(item => item.text).join('\n'));
         return { text: text || 'The model returned no text response.', history: messages, trace };
       }
 
@@ -117,6 +126,7 @@ class OpenAIModelClient {
           tools,
           tool_choice: 'auto',
           max_tokens: this.config.maxOutputTokens,
+          temperature: this.config.temperature ?? 0.1,
           stream: false
         })
       });
@@ -136,7 +146,7 @@ class OpenAIModelClient {
         arguments: parseArguments(item.function?.arguments)
       }));
       if (calls.length === 0) {
-        const text = typeof modelMessage.content === 'string' ? modelMessage.content.trim() : '';
+        const text = cleanModelText(typeof modelMessage.content === 'string' ? modelMessage.content : '');
         return { text: text || 'The model returned no text response.', history: messages, trace };
       }
       if (calls.some(call => !call.id || !call.name)) throw new Error('Model returned an incomplete tool call');
@@ -159,4 +169,4 @@ export function createModelClient(config, fetchImpl = fetch) {
     : new OpenAIModelClient(config, fetchImpl);
 }
 
-export { SYSTEM_PROMPT };
+export { SYSTEM_PROMPT, cleanModelText };

@@ -8,16 +8,16 @@
   },
   "scripts": {
     "start": "node src/index.mjs",
-    "chat": "docker compose -f docker/docker-compose.chat.yml up --build",
+    "chat": "node scripts/start-chat.mjs",
     "chat:host": "node src/web/server.mjs",
     "check": "node --check src/index.mjs && node scripts/check-all.mjs",
     "test": "node --test",
     "render:diagrams": "python3 scripts/render_diagrams.py",
     "doctor": "node scripts/doctor.mjs",
-    "docker:build": "docker build -f docker/Dockerfile -t cityjson-mcp .",
+    "docker:build": "docker build -f docker/Dockerfile -t yarroudh/cityjson-mcp:latest .",
     "docker:cache:val3dity": "docker build -f docker/Dockerfile --target val3dity-builder -t cityjson-mcp-val3dity-builder .",
     "docker:cache:cjval": "docker build -f docker/Dockerfile --target cjval-builder -t cityjson-mcp-cjval-builder .",
-    "docker:doctor": "docker run --rm --entrypoint node cityjson-mcp /app/scripts/doctor.mjs"
+    "docker:doctor": "docker run --rm --entrypoint node yarroudh/cityjson-mcp:latest /app/scripts/doctor.mjs"
   },
   "engines": {
     "node": ">=20"

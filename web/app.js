@@ -1,5 +1,6 @@
 import { marked } from '/vendor/marked.esm.js';
 import DOMPurify from '/vendor/purify.es.mjs';
+import { followUpSuggestions, inferSuggestionState, initialSuggestions } from '/suggestions.js?v=1';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -7,7 +8,11 @@ const elements = {
   app: document.querySelector('#app'),
   fileInput: document.querySelector('#file-input'),
   importButton: document.querySelector('#import-button'),
-  modelSettingsButton: document.querySelector('#model-settings-button'),
+  sidebarModelTrigger: document.querySelector('#sidebar-model-trigger'),
+  sidebarModelLabel: document.querySelector('#sidebar-model-label'),
+  sidebarModelMenu: document.querySelector('#sidebar-model-menu'),
+  sidebarModelList: document.querySelector('#sidebar-model-list'),
+  sidebarAddModel: document.querySelector('#sidebar-add-model'),
   dropzone: document.querySelector('#dropzone'),
   sidebarEmpty: document.querySelector('#sidebar-empty'),
   conversationList: document.querySelector('#conversation-list'),
@@ -23,12 +28,17 @@ const elements = {
   sendButton: document.querySelector('#send-button'),
   modelTrigger: document.querySelector('#model-trigger'),
   modelLabel: document.querySelector('#model-label'),
+  modelMenu: document.querySelector('#model-menu'),
+  modelList: document.querySelector('#model-list'),
+  addModel: document.querySelector('#add-model'),
   toolsTrigger: document.querySelector('#tools-trigger'),
   toolsMenu: document.querySelector('#tools-menu'),
   toolCount: document.querySelector('#tool-count'),
   toolList: document.querySelector('#tool-list'),
   backendStatus: document.querySelector('#backend-status'),
   themeToggle: document.querySelector('#theme-toggle'),
+  aboutButton: document.querySelector('#about-button'),
+  promptSuggestions: document.querySelector('#prompt-suggestions'),
   dragOverlay: document.querySelector('#drag-overlay'),
   importOverlay: document.querySelector('#import-overlay'),
   importStatus: document.querySelector('#import-status'),
@@ -47,9 +57,14 @@ const elements = {
   toolDialogClose: document.querySelector('#tool-dialog-close'),
   toolDialogName: document.querySelector('#tool-dialog-name'),
   toolDialogDescription: document.querySelector('#tool-dialog-description'),
-  toolDialogParameters: document.querySelector('#tool-dialog-parameters')
+  toolDialogParameters: document.querySelector('#tool-dialog-parameters'),
+  aboutDialog: document.querySelector('#about-dialog'),
+  aboutDialogClose: document.querySelector('#about-dialog-close')
 };
 
+const CACHE_KEY = 'datum-state-v1';
+const CLIENT_KEY = 'datum-client-id';
+const CACHE_TTL_MS = 8 * 60 * 60 * 1000;
 let conversations = [];
 let activeId = null;
 let sendingId = null;
@@ -58,15 +73,46 @@ let runtimeConfig = null;
 let sequence = 1;
 let dragDepth = 0;
 let clientId;
+let pendingSuggestion = null;
 
 try {
-  clientId = sessionStorage.getItem('datum-client-id');
+  clientId = localStorage.getItem(CLIENT_KEY);
   if (!clientId) {
     clientId = crypto.randomUUID();
-    sessionStorage.setItem('datum-client-id', clientId);
+    localStorage.setItem(CLIENT_KEY, clientId);
   }
 } catch {
   clientId = crypto.randomUUID();
+}
+
+function restoreState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+    if (!saved || Date.now() - saved.savedAt > CACHE_TTL_MS || !Array.isArray(saved.conversations)) {
+      localStorage.removeItem(CACHE_KEY);
+      return;
+    }
+    conversations = saved.conversations.slice(0, 25).filter(conversation => conversation?.id && Array.isArray(conversation.messages));
+    activeId = conversations.some(conversation => conversation.id === saved.activeId)
+      ? saved.activeId
+      : conversations[0]?.id || null;
+    sequence = Number.isSafeInteger(saved.sequence) && saved.sequence > 0
+      ? saved.sequence
+      : Math.max(0, ...conversations.map(conversation => Number(conversation.number) || 0)) + 1;
+  } catch {
+    try { localStorage.removeItem(CACHE_KEY); } catch {}
+  }
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      savedAt: Date.now(),
+      conversations: conversations.slice(0, 25),
+      activeId,
+      sequence
+    }));
+  } catch {}
 }
 
 function activeConversation() {
@@ -95,13 +141,40 @@ function summaryCrs(summary) {
   return summary?.metadata?.referenceSystem || summary?.metadata?.crs || 'CRS not specified';
 }
 
+function markdownCell(value) {
+  return String(value ?? 'Not specified').replaceAll('|', '\\|').replaceAll('\n', ' ');
+}
+
+function inlineCode(value) {
+  const text = String(value);
+  const delimiter = text.includes('`') ? '``' : '`';
+  return `${delimiter}${text}${delimiter}`;
+}
+
 function welcomeMessage(file) {
   const summary = file.summary || {};
-  const types = Object.entries(summary.typeCounts || {}).sort((a, b) => b[1] - a[1]);
-  const primary = types[0]?.[0] || 'city object';
-  const otherTypes = Math.max(types.length - 1, 0);
-  const lod = summary.lods?.length ? ` at LoD ${summary.lods.join('/')}` : '';
-  return `Imported ${file.originalFilename} CityJSON ${summary.version || '(unknown version)'} file, with ${formatCount(summary.cityObjectCount)} city objects${lod}, mostly ${primary}${otherTypes ? ` and ${otherTypes} other type${otherTypes === 1 ? '' : 's'}` : ''}. Coordinate Reference System: ${summaryCrs(summary)}. Ask about specific objects, request a query, or run a connected tool below.`;
+  const types = Object.entries(summary.typeCounts || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => `${name}: ${formatCount(count)}`)
+    .join(', ') || 'None reported';
+  const attributeNames = summary.attributeNames || summary.attributes;
+  const attributes = Array.isArray(attributeNames)
+    ? `${formatCount(attributeNames.length)} (${attributeNames.slice(0, 8).join(', ')}${attributeNames.length > 8 ? ', …' : ''})`
+    : summary.attributeCount == null ? 'Not reported' : formatCount(summary.attributeCount);
+  return `Imported ${inlineCode(file.originalFilename)} successfully.
+
+| Metadata | Value |
+| --- | --- |
+| File size | ${markdownCell(formatBytes(file.sizeBytes || 0))} |
+| CityJSON version | ${markdownCell(summary.version || 'Unknown')} |
+| CityObjects | ${markdownCell(formatCount(summary.cityObjectCount))} |
+| Vertices | ${markdownCell(formatCount(summary.vertexCount))} |
+| Levels of detail | ${markdownCell(summary.lods?.length ? summary.lods.join(', ') : 'Not reported')} |
+| Coordinate reference system | ${markdownCell(summaryCrs(summary))} |
+| Object types | ${markdownCell(types)} |
+| Attributes | ${markdownCell(attributes)} |
+
+You can ask a question below or choose one of the examples.`;
 }
 
 function showError(message) {
@@ -130,25 +203,33 @@ function createActionButton(label, title, handler) {
   return button;
 }
 
-function exportConversation(conversation, event) {
+async function downloadDataset(conversation, event) {
   event.stopPropagation();
-  const content = JSON.stringify({
-    file: conversation.originalFilename,
-    datasetId: conversation.summary.datasetId,
-    messages: conversation.messages
-  }, null, 2);
-  const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${conversation.originalFilename.replace(/\.json$/i, '')}-conversation.json`;
-  link.click();
-  URL.revokeObjectURL(url);
+  hideError();
+  try {
+    const result = await requestJson('/api/datasets/download', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ datasetId: conversation.summary.datasetId })
+    });
+    const download = result.downloads?.[0];
+    if (!download) throw new Error('The dataset did not produce a downloadable file');
+    const link = document.createElement('a');
+    link.href = download.url;
+    link.download = download.filename || conversation.originalFilename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  } catch (error) {
+    showError(`Download failed: ${error.message}`);
+  }
 }
 
 async function deleteConversation(conversation, event) {
   event.stopPropagation();
   conversations = conversations.filter(item => item.id !== conversation.id);
   if (activeId === conversation.id) activeId = conversations[0]?.id || null;
+  saveState();
   render();
   await requestJson('/api/session/reset', {
     method: 'POST',
@@ -168,12 +249,14 @@ function renderConversationList() {
     card.tabIndex = 0;
     card.addEventListener('click', () => {
       activeId = conversation.id;
+      saveState();
       render();
     });
     card.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         activeId = conversation.id;
+        saveState();
         render();
       }
     });
@@ -190,7 +273,7 @@ function renderConversationList() {
     const actions = document.createElement('span');
     actions.className = 'conversation-actions';
     actions.append(
-      createActionButton('↓', 'Export conversation', event => exportConversation(conversation, event)),
+      createActionButton('↓', 'Download imported CityJSON', event => downloadDataset(conversation, event)),
       createActionButton('×', 'Discard conversation', event => deleteConversation(conversation, event))
     );
     meta.append(facts, actions);
@@ -271,6 +354,44 @@ function renderMessage(message) {
   return row;
 }
 
+function renderSuggestions(conversation, disabled) {
+  const allSuggestions = conversation.suggestionState
+    ? followUpSuggestions(conversation.suggestionState)
+    : initialSuggestions();
+  const pageCount = Math.ceil(allSuggestions.length / 3);
+  const page = Math.max(0, Number(conversation.suggestionPage) || 0) % pageCount;
+  const suggestions = allSuggestions.slice(page * 3, page * 3 + 3);
+  const heading = document.createElement('div');
+  heading.className = 'suggestion-heading';
+  const label = document.createElement('span');
+  label.className = 'suggestion-label';
+  label.textContent = conversation.suggestionState ? 'Suggested follow-ups' : 'Try asking';
+  heading.append(label);
+  if (pageCount > 1) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'suggestion-more';
+    more.dataset.suggestionMore = 'true';
+    more.textContent = 'More';
+    more.disabled = disabled;
+    heading.append(more);
+  }
+  const list = document.createElement('div');
+  list.className = 'suggestion-list';
+  for (const suggestion of suggestions) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.disabled = disabled;
+    button.dataset.prompt = suggestion.prompt;
+    button.dataset.topic = suggestion.topic;
+    button.dataset.depth = String(suggestion.depth);
+    button.title = suggestion.prompt;
+    button.textContent = suggestion.label;
+    list.append(button);
+  }
+  elements.promptSuggestions.replaceChildren(heading, list);
+}
+
 function renderActiveConversation() {
   const active = activeConversation();
   const hasActive = Boolean(active);
@@ -282,7 +403,7 @@ function renderActiveConversation() {
 
   elements.conversationNumber.textContent = `#${String(active.number).padStart(3, '0')}`;
   elements.conversationTitle.textContent = active.name;
-  elements.modelMetadata.textContent = `${summaryCrs(active.summary)} · v${active.summary.version || 'unknown'}`;
+  elements.modelMetadata.textContent = `v${active.summary.version || 'unknown version'}`;
   elements.thread.replaceChildren(...active.messages.map(renderMessage));
 
   if (sendingId === active.id) {
@@ -303,6 +424,8 @@ function renderActiveConversation() {
 
   const modelUnavailable = runtimeConfig?.modelConfigured === false;
   const unavailable = Boolean(sendingId) || importing || modelUnavailable;
+  elements.promptSuggestions.hidden = Boolean(sendingId) || importing;
+  if (!elements.promptSuggestions.hidden) renderSuggestions(active, modelUnavailable);
   elements.message.disabled = unavailable;
   elements.message.placeholder = modelUnavailable
     ? 'Configure a model to start chatting…'
@@ -375,16 +498,90 @@ function showToolDocumentation(tool) {
 
 function openModelDialog() {
   elements.modelProvider.value = runtimeConfig?.provider || 'openai';
-  elements.modelName.value = runtimeConfig?.model || '';
+  elements.modelName.value = '';
   elements.modelApiKey.value = '';
-  elements.modelBaseUrl.value = runtimeConfig?.baseUrl || '';
+  elements.modelBaseUrl.value = elements.modelProvider.value === 'anthropic'
+    ? 'https://api.anthropic.com'
+    : 'https://api.openai.com/v1';
   elements.modelDialog.showModal();
+}
+
+function closeMenus() {
+  for (const [trigger, menu] of [
+    [elements.modelTrigger, elements.modelMenu],
+    [elements.sidebarModelTrigger, elements.sidebarModelMenu],
+    [elements.toolsTrigger, elements.toolsMenu]
+  ]) {
+    menu.hidden = true;
+    trigger?.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function createModelOption(model) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `model-option${model.id === runtimeConfig.activeModelId ? ' active' : ''}`;
+  button.setAttribute('role', 'menuitemradio');
+  button.setAttribute('aria-checked', String(model.id === runtimeConfig.activeModelId));
+  const copy = document.createElement('span');
+  copy.className = 'model-option-copy';
+  const name = document.createElement('span');
+  name.className = 'model-option-name';
+  name.textContent = model.model;
+  const meta = document.createElement('span');
+  meta.className = 'model-option-meta';
+  meta.textContent = `${model.provider} API${model.isDefault ? ' · default' : ''} · ${model.baseUrl}`;
+  copy.append(name, meta);
+  if (model.id === runtimeConfig.activeModelId) {
+    const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    check.classList.add('model-option-check');
+    check.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'm5 12 4 4L19 6');
+    check.append(path);
+    button.append(copy, check);
+  } else {
+    button.append(copy);
+  }
+  button.addEventListener('click', () => selectModel(model.id));
+  return button;
+}
+
+function renderModelMenus() {
+  const models = runtimeConfig?.models || [];
+  for (const list of [elements.modelList, elements.sidebarModelList]) {
+    list.replaceChildren(...models.map(createModelOption));
+    if (!models.length) {
+      const empty = document.createElement('span');
+      empty.className = 'picker-menu-header';
+      empty.textContent = 'No model is configured yet';
+      list.append(empty);
+    }
+  }
+}
+
+async function selectModel(modelId) {
+  closeMenus();
+  if (modelId === runtimeConfig?.activeModelId) return;
+  hideError();
+  try {
+    const selected = await requestJson('/api/models/select', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId, modelId })
+    });
+    configureRuntime({ ...runtimeConfig, ...selected });
+  } catch (error) {
+    showError(`Model selection failed: ${error.message}`);
+  }
 }
 
 function configureRuntime(config) {
   runtimeConfig = config;
-  const modelName = config.modelConfigured ? config.model : 'Configure model';
+  const modelName = config.modelConfigured ? config.model : 'Add a model';
   elements.modelLabel.textContent = modelName;
+  elements.sidebarModelLabel.textContent = modelName;
+  renderModelMenus();
   elements.toolCount.textContent = `· ${config.toolCount}`;
   const backendEntries = Object.values(config.backends || {});
   const availableBackends = backendEntries.filter(backend => backend?.available === true).length;
@@ -439,6 +636,7 @@ async function importOneFile(file) {
   };
   conversations = [conversation, ...conversations];
   activeId = id;
+  saveState();
 }
 
 async function importFiles(files) {
@@ -466,11 +664,18 @@ async function sendMessage() {
   const text = elements.message.value.trim();
   if (!active || !text || sendingId || importing) return;
   const usedInitialBatch = active.batchPending;
+  const selectedSuggestion = pendingSuggestion?.conversationId === active.id && pendingSuggestion.prompt === text
+    ? { topic: pendingSuggestion.topic, depth: pendingSuggestion.depth }
+    : inferSuggestionState(text, active.suggestionState);
+  if (selectedSuggestion) active.suggestionState = selectedSuggestion;
+  active.suggestionPage = 0;
+  pendingSuggestion = null;
   active.messages.push({
     role: 'user',
     content: text,
     file: usedInitialBatch ? { name: active.originalFilename, sizeBytes: active.sizeBytes } : undefined
   });
+  saveState();
   elements.message.value = '';
   elements.message.style.height = 'auto';
   sendingId = active.id;
@@ -490,10 +695,12 @@ async function sendMessage() {
     });
     active.batchPending = false;
     active.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
+    saveState();
   } catch (error) {
     showError(`Reply failed: ${error.message}`);
   } finally {
     sendingId = null;
+    saveState();
     render();
     elements.message.focus();
   }
@@ -501,7 +708,12 @@ async function sendMessage() {
 
 function toggleMenu(menu) {
   const willOpen = menu.hidden;
+  closeMenus();
   menu.hidden = !willOpen;
+  const trigger = menu === elements.modelMenu
+    ? elements.modelTrigger
+    : menu === elements.sidebarModelMenu ? elements.sidebarModelTrigger : elements.toolsTrigger;
+  trigger?.setAttribute('aria-expanded', String(willOpen));
 }
 
 elements.importButton.addEventListener('click', () => elements.fileInput.click());
@@ -525,21 +737,36 @@ elements.message.addEventListener('keydown', event => {
   }
 });
 
-elements.modelSettingsButton.addEventListener('click', openModelDialog);
-elements.modelTrigger.addEventListener('click', openModelDialog);
+elements.modelTrigger.addEventListener('click', event => {
+  event.stopPropagation();
+  toggleMenu(elements.modelMenu);
+});
+elements.sidebarModelTrigger.addEventListener('click', event => {
+  event.stopPropagation();
+  toggleMenu(elements.sidebarModelMenu);
+});
+for (const addButton of [elements.addModel, elements.sidebarAddModel]) {
+  addButton.addEventListener('click', event => {
+    event.stopPropagation();
+    closeMenus();
+    openModelDialog();
+  });
+}
 elements.toolsTrigger.addEventListener('click', event => {
   event.stopPropagation();
   toggleMenu(elements.toolsMenu);
 });
-document.addEventListener('click', () => {
-  elements.toolsMenu.hidden = true;
-});
-elements.toolsMenu.addEventListener('click', event => event.stopPropagation());
+document.addEventListener('click', closeMenus);
+for (const menu of [elements.modelMenu, elements.sidebarModelMenu, elements.toolsMenu]) {
+  menu.addEventListener('click', event => event.stopPropagation());
+}
 
 elements.modelDialogClose.addEventListener('click', () => elements.modelDialog.close());
 elements.modelCancel.addEventListener('click', () => elements.modelDialog.close());
 elements.toolDialogClose.addEventListener('click', () => elements.toolDialog.close());
-for (const dialog of [elements.modelDialog, elements.toolDialog]) {
+elements.aboutButton.addEventListener('click', () => elements.aboutDialog.showModal());
+elements.aboutDialogClose.addEventListener('click', () => elements.aboutDialog.close());
+for (const dialog of [elements.modelDialog, elements.toolDialog, elements.aboutDialog]) {
   dialog.addEventListener('click', event => {
     if (event.target === dialog) dialog.close();
   });
@@ -557,7 +784,7 @@ elements.modelForm.addEventListener('submit', async event => {
   submit.disabled = true;
   hideError();
   try {
-    const selected = await requestJson('/api/model/configure', {
+    const selected = await requestJson('/api/models', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -569,11 +796,6 @@ elements.modelForm.addEventListener('submit', async event => {
       })
     });
     configureRuntime({ ...runtimeConfig, ...selected });
-    for (const conversation of conversations) conversation.messages.push({
-      role: 'assistant',
-      content: `Model changed to **${selected.model}**. The next message starts a fresh model session for this conversation.`,
-      synthetic: true
-    });
     elements.modelDialog.close();
     render();
   } catch (error) {
@@ -582,6 +804,29 @@ elements.modelForm.addEventListener('submit', async event => {
     submit.disabled = false;
     elements.modelApiKey.value = '';
   }
+});
+
+elements.promptSuggestions.addEventListener('click', event => {
+  const more = event.target.closest('[data-suggestion-more]');
+  if (more) {
+    const active = activeConversation();
+    if (!active) return;
+    active.suggestionPage = (Number(active.suggestionPage) || 0) + 1;
+    saveState();
+    renderActiveConversation();
+    return;
+  }
+  const button = event.target.closest('[data-prompt]');
+  if (!button) return;
+  pendingSuggestion = {
+    conversationId: activeId,
+    prompt: button.dataset.prompt,
+    topic: button.dataset.topic,
+    depth: Number(button.dataset.depth)
+  };
+  elements.message.value = button.dataset.prompt;
+  elements.message.dispatchEvent(new Event('input'));
+  elements.message.focus();
 });
 
 elements.themeToggle.addEventListener('click', () => {
@@ -614,6 +859,7 @@ try {
   if (savedTheme === 'light' || savedTheme === 'dark') elements.app.dataset.theme = savedTheme;
 } catch {}
 
+restoreState();
 requestJson(`/api/config?clientId=${encodeURIComponent(clientId)}`)
   .then(config => {
     configureRuntime(config);

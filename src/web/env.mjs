@@ -40,6 +40,15 @@ function booleanValue(value, fallback, name) {
   throw new Error(`${name} must be true or false`);
 }
 
+function numberInRange(value, fallback, name, minimum, maximum) {
+  if (value === undefined || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be between ${minimum} and ${maximum}`);
+  }
+  return parsed;
+}
+
 export function getWebConfig(env = process.env) {
   const provider = (env.MODEL_PROVIDER || 'anthropic').toLowerCase();
   if (!['anthropic', 'openai'].includes(provider)) throw new Error('MODEL_PROVIDER must be anthropic or openai');
@@ -52,6 +61,7 @@ export function getWebConfig(env = process.env) {
     model,
     baseUrl: env.MODEL_BASE_URL || (provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'),
     maxOutputTokens: positiveInteger(env.MODEL_MAX_OUTPUT_TOKENS, 4096, 'MODEL_MAX_OUTPUT_TOKENS'),
+    temperature: numberInRange(env.MODEL_TEMPERATURE, 0.1, 'MODEL_TEMPERATURE', 0, 1),
     maxToolRounds: positiveInteger(env.CHAT_MAX_TOOL_ROUNDS, 12, 'CHAT_MAX_TOOL_ROUNDS'),
     maxToolResultChars: positiveInteger(env.CHAT_MAX_TOOL_RESULT_CHARS, 100000, 'CHAT_MAX_TOOL_RESULT_CHARS'),
     allowPartialBackends: booleanValue(env.CHAT_ALLOW_PARTIAL_BACKENDS, false, 'CHAT_ALLOW_PARTIAL_BACKENDS'),

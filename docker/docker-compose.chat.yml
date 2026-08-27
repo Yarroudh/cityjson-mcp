@@ -1,9 +1,6 @@
 services:
   cityjson-chat:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    image: yarroudh/cityjson-mcp:latest
+    image: ${CITYJSON_MCP_IMAGE:-yarroudh/cityjson-mcp:latest}
     entrypoint: ["node", "/app/src/web/server.mjs"]
     env_file:
       - path: ../.env

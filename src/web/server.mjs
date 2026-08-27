@@ -92,7 +92,9 @@ async function staticResponse(requestPath, response) {
   const staticFiles = {
     'index.html': path.join(publicRoot, 'index.html'),
     'app.js': path.join(publicRoot, 'app.js'),
+    'suggestions.js': path.join(publicRoot, 'suggestions.js'),
     'styles.css': path.join(publicRoot, 'styles.css'),
+    'favicon.svg': path.join(publicRoot, 'favicon.svg'),
     'vendor/marked.esm.js': path.join(projectRoot, 'node_modules/marked/lib/marked.esm.js'),
     'vendor/purify.es.mjs': path.join(projectRoot, 'node_modules/dompurify/dist/purify.es.mjs')
   };
@@ -135,16 +137,57 @@ export async function createChatApplication(config = getWebConfig(), dependencie
   const defaultModel = dependencies.model || (config.model && config.apiKey
     ? createModelClient(config, dependencies.fetchImpl || fetch)
     : null);
+  const defaultProfile = defaultModel && config.model
+    ? { id: 'default', config, client: defaultModel, isDefault: true }
+    : null;
   const sessions = new Map();
   const uploadBatches = new Map();
   const modelConfigurations = new Map();
   const downloadStore = new Map();
-  const batchTtlMs = 60 * 60 * 1000;
+  const batchTtlMs = 8 * 60 * 60 * 1000;
   const downloadTtlMs = 30 * 60 * 1000;
   const modelConfigurationTtlMs = 8 * 60 * 60 * 1000;
 
+  function configurationFor(clientId, create = false) {
+    let state = clientId ? modelConfigurations.get(clientId) : undefined;
+    if (!state && create) {
+      state = { profiles: new Map(), activeId: defaultProfile?.id || null, updatedAt: Date.now() };
+      modelConfigurations.set(clientId, state);
+    }
+    return state;
+  }
+
+  function profilesFor(clientId) {
+    const state = configurationFor(clientId);
+    return [defaultProfile, ...(state?.profiles.values() || [])].filter(Boolean);
+  }
+
   function modelFor(clientId) {
-    return clientId ? modelConfigurations.get(clientId) || { config, client: defaultModel } : { config, client: defaultModel };
+    const state = configurationFor(clientId);
+    const activeId = state?.activeId || defaultProfile?.id || null;
+    const selected = activeId === defaultProfile?.id
+      ? defaultProfile
+      : state?.profiles.get(activeId);
+    return selected || defaultProfile || { id: null, config, client: null, isDefault: false };
+  }
+
+  function publicModelState(clientId) {
+    const selected = modelFor(clientId);
+    const models = profilesFor(clientId).map(profile => ({
+      id: profile.id,
+      ...publicModelConfig(profile.config),
+      isDefault: profile.isDefault === true
+    }));
+    return {
+      ...publicModelConfig(selected.config),
+      activeModelId: selected.id,
+      modelConfigured: Boolean(selected.client),
+      models
+    };
+  }
+
+  function clearClientSessions(clientId) {
+    for (const [sessionId, session] of sessions) if (session.clientId === clientId) sessions.delete(sessionId);
   }
 
   function registerDownloads(resources) {
@@ -176,10 +219,9 @@ export async function createChatApplication(config = getWebConfig(), dependencie
 
     try {
       if (request.method === 'GET' && url.pathname === '/api/config') {
-        const selected = modelFor(url.searchParams.get('clientId'));
+        const browserId = url.searchParams.get('clientId');
         sendJson(response, 200, {
-          ...publicModelConfig(selected.config),
-          modelConfigured: Boolean(selected.client),
+          ...publicModelState(browserId),
           maxUploadBytes: config.maxUploadBytes,
           maxUploadFiles: config.maxUploadFiles,
           toolCount: gateway.tools.length,
@@ -194,19 +236,38 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         return;
       }
 
-      if (request.method === 'POST' && url.pathname === '/api/model/configure') {
+      if (request.method === 'POST' && ['/api/models', '/api/model/configure'].includes(url.pathname)) {
         const body = await readJson(request, 32 * 1024);
         const id = clientKey(body.clientId);
-        const previous = modelFor(id).config;
-        const selectedConfig = configuredModel(config, body, previous);
-        modelConfigurations.set(id, {
+        const selectedConfig = configuredModel(config, body, { ...config, apiKey: null });
+        const modelId = `model-${crypto.randomUUID()}`;
+        const state = configurationFor(id, true);
+        state.profiles.set(modelId, {
+          id: modelId,
           config: selectedConfig,
           client: createModelClient(selectedConfig, dependencies.fetchImpl || fetch),
-          updatedAt: Date.now()
+          isDefault: false
         });
-        for (const [sessionId, session] of sessions) if (session.clientId === id) sessions.delete(sessionId);
+        state.activeId = modelId;
+        state.updatedAt = Date.now();
+        clearClientSessions(id);
         pruneState();
-        sendJson(response, 200, { ...publicModelConfig(selectedConfig), modelConfigured: true });
+        sendJson(response, 201, publicModelState(id));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/models/select') {
+        const body = await readJson(request, 32 * 1024);
+        const id = clientKey(body.clientId);
+        const modelId = typeof body.modelId === 'string' ? body.modelId : '';
+        const state = configurationFor(id, true);
+        const exists = modelId === defaultProfile?.id || state.profiles.has(modelId);
+        if (!exists) throw new Error('The selected model is unknown or has expired');
+        state.activeId = modelId;
+        state.updatedAt = Date.now();
+        clearClientSessions(id);
+        pruneState();
+        sendJson(response, 200, publicModelState(id));
         return;
       }
 
@@ -236,7 +297,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const browserId = clientKey(body.clientId);
         const selected = modelFor(browserId);
         if (!selected.client) throw new Error('Configure a model before sending a message');
-        if (modelConfigurations.has(browserId)) selected.updatedAt = Date.now();
+        if (modelConfigurations.has(browserId)) modelConfigurations.get(browserId).updatedAt = Date.now();
         const modelFingerprint = `${selected.config.provider}\u0000${selected.config.model}\u0000${selected.config.baseUrl}`;
         const batch = body.batchId ? uploadBatches.get(body.batchId) : undefined;
         if (body.batchId && !batch) throw new Error('The attachment batch is unknown or expired; attach the files again');
@@ -276,6 +337,19 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           attachments: batch?.files || [],
           downloads: registerDownloads(resources)
         });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/datasets/download') {
+        const body = await readJson(request, 32 * 1024);
+        const datasetId = typeof body.datasetId === 'string' ? body.datasetId.trim() : '';
+        if (!/^[A-Za-z0-9_.:-]{3,300}$/.test(datasetId)) throw new Error('A valid datasetId is required');
+        const result = await gateway.call('cityjson_download', { dataset_id: datasetId });
+        if (result.isError) throw new Error(result.modelContent || 'The dataset could not be prepared for download');
+        const downloads = registerDownloads(result.downloads || []);
+        if (!downloads.length) throw new Error('The dataset did not produce a downloadable file');
+        pruneState();
+        sendJson(response, 200, { downloads });
         return;
       }
 
@@ -336,7 +410,7 @@ export async function startChatApplication() {
     app.server.once('error', reject);
     app.server.listen(config.port, config.host, resolve);
   });
-  console.log(`DATUM listening on http://${config.host}:${config.port} (${config.provider}/${config.model})`);
+  console.log(`Datum listening on http://${config.host}:${config.port} (${config.provider}/${config.model})`);
 
   const shutdown = async () => {
     const forceExit = setTimeout(() => process.exit(0), 3000);

@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Datum is a web application for exploring CityJSON datasets through a conversational interface. Import a CityJSON file to ask questions about its contents, or run any connected CityJSON tool.">
   <title>Datum</title>
-  <link rel="stylesheet" href="/styles.css?v=2">
+  <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=6">
 </head>
 <body>
   <div class="app" id="app" data-theme="dark">
@@ -13,24 +14,45 @@
 
     <aside class="sidebar">
       <header class="brand">
-        <div>
+        <div class="brand-identity">
+          <img class="brand-logo" src="/favicon.svg?v=1" alt="">
+          <div>
           <div class="brand-mark">Datum</div>
-          <div class="brand-sub">Your assistant for CityJSON</div>
+          <div class="brand-sub">CityJSON Assistant</div>
+          </div>
         </div>
-        <button class="icon-button theme-toggle" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme">
-          <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-          <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5 8.5 8.5 0 1 0 20.5 14.3Z"/></svg>
-        </button>
+        <div class="brand-actions">
+          <a class="icon-button" href="https://github.com/Yarroudh/cityjson-mcp" target="_blank" rel="noopener noreferrer" title="View CityJSON MCP on GitHub" aria-label="View CityJSON MCP on GitHub">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7.4A5.8 5.8 0 0 0 19.3 3 5.4 5.4 0 0 0 19.1 0S17.9-.4 15 1.5a14 14 0 0 0-6 0C6.1-.4 4.9 0 4.9 0a5.4 5.4 0 0 0-.2 3A5.8 5.8 0 0 0 3.2 7.1c0 5.8 3.5 7 6.8 7.4A4.8 4.8 0 0 0 9 18v4M9 19c-3 .9-3-1.5-4.2-2"/></svg>
+          </a>
+          <button class="icon-button" id="about-button" type="button" title="About Datum" aria-label="About Datum">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
+          </button>
+          <button class="icon-button theme-toggle" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme">
+            <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+            <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5 8.5 8.5 0 1 0 20.5 14.3Z"/></svg>
+          </button>
+        </div>
       </header>
 
       <div class="sidebar-empty" id="sidebar-empty">No models loaded yet. Import a CityJSON file to open a conversation about it.</div>
       <div class="conversation-list" id="conversation-list"></div>
 
       <footer class="sidebar-footer">
-        <button class="stub-button" id="model-settings-button" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 21c.8-4 3.1-6 7-6s6.2 2 7 6M19 5l2 2M5 5 3 7"/></svg>
-          Configure model
-        </button>
+        <div class="picker sidebar-model-picker">
+          <button class="stub-button model-selector" id="sidebar-model-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span class="picker-dot"></span><span class="model-selector-label" id="sidebar-model-label">Loading model…</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>
+          </button>
+          <div class="picker-menu model-menu sidebar-model-menu" id="sidebar-model-menu" hidden>
+            <div class="picker-menu-header">Models</div>
+            <div class="model-list" id="sidebar-model-list"></div>
+            <button class="add-model-button" id="sidebar-add-model" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              Add a model
+            </button>
+          </div>
+        </div>
         <button class="stub-button primary" id="import-button" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3M7 8l5-5 5 5M4 15v5h16v-5"/></svg>
           Import CityJSON
@@ -57,11 +79,19 @@
       <section class="composer-wrap" id="composer-wrap" hidden>
         <div class="composer-bar">
           <div class="picker">
-            <button class="picker-trigger" id="model-trigger" type="button">
+            <button class="picker-trigger" id="model-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
               <span class="picker-dot"></span>
               <span id="model-label">Loading model…</span>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="m19 13.5 1.3 1-.8 1.5-1.6-.3a7 7 0 0 1-1.4 1.4l.3 1.6-1.5.8-1-1.3a7 7 0 0 1-2 .3l-1 1.3-1.5-.8.3-1.6A7 7 0 0 1 8.7 16l-1.6.3-.8-1.5 1.3-1a7 7 0 0 1-.3-2l-1.3-1 .8-1.5 1.6.3a7 7 0 0 1 1.4-1.4l-.3-1.6 1.5-.8 1 1.3a7 7 0 0 1 2 .3l1-1.3 1.5.8-.3 1.6a7 7 0 0 1 1.4 1.4l1.6-.3.8 1.5-1.3 1a7 7 0 0 1 .3 2Z"/></svg>
             </button>
+            <div class="picker-menu model-menu" id="model-menu" hidden>
+              <div class="picker-menu-header">Models</div>
+              <div class="model-list" id="model-list"></div>
+              <button class="add-model-button" id="add-model" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                Add a model
+              </button>
+            </div>
           </div>
 
           <div class="picker">
@@ -81,6 +111,7 @@
           </div>
         </div>
 
+        <div class="prompt-suggestions" id="prompt-suggestions" aria-label="Suggested questions"></div>
         <form class="composer" id="chat-form">
           <textarea id="message" rows="1" placeholder="Ask about the model, or request a tool action…" aria-label="Message"></textarea>
           <button class="send-btn" id="send-button" type="submit" disabled aria-label="Send message">
@@ -108,13 +139,13 @@
     <dialog class="modal" id="model-dialog">
       <form class="modal-card model-form" id="model-form">
         <header class="modal-header">
-          <div><span class="modal-kicker">Model</span><h2>Configure your model</h2></div>
+          <div><span class="modal-kicker">Model</span><h2>Add a model</h2></div>
           <button class="modal-close" id="model-dialog-close" type="button" aria-label="Close">×</button>
         </header>
-        <p class="modal-intro">Configure your model settings. Your API key is sent only to this application and is never displayed after saving.</p>
+        <p class="modal-intro">Add an Anthropic Messages or OpenAI-compatible model. Credentials stay in the running application and are never displayed after saving.</p>
         <label class="field"><span>API style</span><select id="model-provider" required><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
         <label class="field"><span>Model name</span><input id="model-name" type="text" maxlength="200" autocomplete="off" required placeholder="e.g. deepseek-v4-pro"></label>
-        <label class="field"><span>API key</span><input id="model-api-key" type="password" maxlength="10000" autocomplete="new-password" placeholder="Leave blank to keep the current key"></label>
+        <label class="field"><span>API key</span><input id="model-api-key" type="password" maxlength="10000" autocomplete="new-password" required placeholder="Enter the API key"></label>
         <label class="field"><span>Base URL</span><input id="model-base-url" type="url" maxlength="2048" autocomplete="off" required placeholder="https://api.example.com"></label>
         <footer class="modal-actions"><button class="stub-button" id="model-cancel" type="button">Cancel</button><button class="stub-button primary" type="submit">Use this model</button></footer>
       </form>
@@ -130,7 +161,21 @@
         <section><h3>Parameters</h3><div class="parameter-list" id="tool-dialog-parameters"></div></section>
       </article>
     </dialog>
+
+    <dialog class="modal" id="about-dialog">
+      <article class="modal-card about-card">
+        <header class="modal-header">
+          <div><span class="modal-kicker">About</span><h2>Datum</h2></div>
+          <button class="modal-close" id="about-dialog-close" type="button" aria-label="Close">×</button>
+        </header>
+        <div class="about-copy">
+          <p>Datum is a focused chat interface for inspecting, validating, transforming, and downloading CityJSON datasets.</p>
+          <p>Attachments are imported directly into the application’s CityJSON MCP workspace. The selected language model can then use the connected <code>cityjson_*</code> actions on immutable dataset handles, without asking you for local file paths.</p>
+          <p>CityJSON MCP is developed by <a href="https://github.com/Yarroudh" target="_blank" rel="noopener noreferrer">Yarroudh</a>. Source code, documentation, and issue tracking are available on <a href="https://github.com/Yarroudh/cityjson-mcp" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
+        </div>
+      </article>
+    </dialog>
   </div>
-  <script type="module" src="/app.js?v=2"></script>
+  <script type="module" src="/app.js?v=6"></script>
 </body>
 </html>
