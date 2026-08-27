@@ -101,7 +101,7 @@ function welcomeMessage(file) {
   const primary = types[0]?.[0] || 'city object';
   const otherTypes = Math.max(types.length - 1, 0);
   const lod = summary.lods?.length ? ` at LoD ${summary.lods.join('/')}` : '';
-  return `Imported ${file.originalFilename} through MCP — CityJSON v${summary.version || 'unknown'}, ${formatCount(summary.cityObjectCount)} city objects${lod}, mostly ${primary}${otherTypes ? ` and ${otherTypes} other type${otherTypes === 1 ? '' : 's'}` : ''}. Reference system: ${summaryCrs(summary)}. Ask about specific objects, request a query, or run a connected tool below.`;
+  return `Imported ${file.originalFilename} CityJSON ${summary.version || '(unknown version)'} file, with ${formatCount(summary.cityObjectCount)} city objects${lod}, mostly ${primary}${otherTypes ? ` and ${otherTypes} other type${otherTypes === 1 ? '' : 's'}` : ''}. Coordinate Reference System: ${summaryCrs(summary)}. Ask about specific objects, request a query, or run a connected tool below.`;
 }
 
 function showError(message) {
