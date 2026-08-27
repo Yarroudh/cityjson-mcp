@@ -49,6 +49,9 @@ const elements = {
   modelForm: document.querySelector('#model-form'),
   modelDialogClose: document.querySelector('#model-dialog-close'),
   modelCancel: document.querySelector('#model-cancel'),
+  modelDialogTitle: document.querySelector('#model-dialog-title'),
+  modelDialogIntro: document.querySelector('#model-dialog-intro'),
+  modelSubmitLabel: document.querySelector('#model-submit-label'),
   modelProvider: document.querySelector('#model-provider'),
   modelName: document.querySelector('#model-name'),
   modelApiKey: document.querySelector('#model-api-key'),
@@ -74,6 +77,7 @@ let sequence = 1;
 let dragDepth = 0;
 let clientId;
 let pendingSuggestion = null;
+let editingModelId = null;
 
 try {
   clientId = localStorage.getItem(CLIENT_KEY);
@@ -496,13 +500,21 @@ function showToolDocumentation(tool) {
   elements.toolDialog.showModal();
 }
 
-function openModelDialog() {
-  elements.modelProvider.value = runtimeConfig?.provider || 'openai';
-  elements.modelName.value = '';
+function openModelDialog(model = null) {
+  editingModelId = model?.id || null;
+  elements.modelDialogTitle.textContent = model ? 'Edit model' : 'Add a model';
+  elements.modelDialogIntro.textContent = model
+    ? 'Update this model configuration. Leave the API key blank to keep the existing key.'
+    : 'Add an Anthropic Messages or OpenAI-compatible model. Credentials stay in the running application and are never displayed after saving.';
+  elements.modelSubmitLabel.textContent = model ? 'Save changes' : 'Use this model';
+  elements.modelProvider.value = model?.provider || 'openai';
+  elements.modelName.value = model?.model || '';
   elements.modelApiKey.value = '';
-  elements.modelBaseUrl.value = elements.modelProvider.value === 'anthropic'
+  elements.modelApiKey.required = !model;
+  elements.modelApiKey.placeholder = model ? 'Leave blank to keep the current key' : 'Enter the API key';
+  elements.modelBaseUrl.value = model?.baseUrl || (elements.modelProvider.value === 'anthropic'
     ? 'https://api.anthropic.com'
-    : 'https://api.openai.com/v1';
+    : 'https://api.openai.com/v1');
   elements.modelDialog.showModal();
 }
 
@@ -518,6 +530,8 @@ function closeMenus() {
 }
 
 function createModelOption(model) {
+  const row = document.createElement('div');
+  row.className = 'model-option-row';
   const button = document.createElement('button');
   button.type = 'button';
   button.className = `model-option${model.id === runtimeConfig.activeModelId ? ' active' : ''}`;
@@ -544,7 +558,31 @@ function createModelOption(model) {
     button.append(copy);
   }
   button.addEventListener('click', () => selectModel(model.id));
-  return button;
+  row.append(button);
+  if (!model.isDefault) {
+    const actions = document.createElement('span');
+    actions.className = 'model-option-actions';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'model-option-action';
+    edit.title = `Edit ${model.model}`;
+    edit.setAttribute('aria-label', edit.title);
+    edit.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20ZM13.5 7l3.5 3.5"/></svg>';
+    edit.addEventListener('click', () => {
+      closeMenus();
+      openModelDialog(model);
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'model-option-action danger';
+    remove.title = `Delete ${model.model}`;
+    remove.setAttribute('aria-label', remove.title);
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>';
+    remove.addEventListener('click', () => deleteModel(model));
+    actions.append(edit, remove);
+    row.append(actions);
+  }
+  return row;
 }
 
 function renderModelMenus() {
@@ -573,6 +611,22 @@ async function selectModel(modelId) {
     configureRuntime({ ...runtimeConfig, ...selected });
   } catch (error) {
     showError(`Model selection failed: ${error.message}`);
+  }
+}
+
+async function deleteModel(model) {
+  closeMenus();
+  if (!window.confirm(`Delete the model configuration for ${model.model}?`)) return;
+  hideError();
+  try {
+    const selected = await requestJson(`/api/models/${encodeURIComponent(model.id)}`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId })
+    });
+    configureRuntime({ ...runtimeConfig, ...selected });
+  } catch (error) {
+    showError(`Model deletion failed: ${error.message}`);
   }
 }
 
@@ -763,6 +817,10 @@ for (const menu of [elements.modelMenu, elements.sidebarModelMenu, elements.tool
 
 elements.modelDialogClose.addEventListener('click', () => elements.modelDialog.close());
 elements.modelCancel.addEventListener('click', () => elements.modelDialog.close());
+elements.modelDialog.addEventListener('close', () => {
+  editingModelId = null;
+  elements.modelApiKey.value = '';
+});
 elements.toolDialogClose.addEventListener('click', () => elements.toolDialog.close());
 elements.aboutButton.addEventListener('click', () => elements.aboutDialog.showModal());
 elements.aboutDialogClose.addEventListener('click', () => elements.aboutDialog.close());
@@ -784,8 +842,9 @@ elements.modelForm.addEventListener('submit', async event => {
   submit.disabled = true;
   hideError();
   try {
-    const selected = await requestJson('/api/models', {
-      method: 'POST',
+    const endpoint = editingModelId ? `/api/models/${encodeURIComponent(editingModelId)}` : '/api/models';
+    const selected = await requestJson(endpoint, {
+      method: editingModelId ? 'PUT' : 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         clientId,
@@ -796,6 +855,7 @@ elements.modelForm.addEventListener('submit', async event => {
       })
     });
     configureRuntime({ ...runtimeConfig, ...selected });
+    editingModelId = null;
     elements.modelDialog.close();
     render();
   } catch (error) {

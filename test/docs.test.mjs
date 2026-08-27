@@ -22,6 +22,9 @@ test('README presents Datum first and contains required setup sections', async (
   assert.match(readme, /### VS Code/);
   assert.match(readme, /## Contributing/);
   assert.match(readme, /## Next/);
+  assert.match(readme, /gemini-3\.7-flash/);
+  assert.match(readme, /Google AI Studio/);
+  assert.match(readme, /free-tier content may be used to improve its products/);
   assert.ok(readme.indexOf('## Quick start: Datum chat application') < readme.indexOf('## Use the MCP server without Datum'));
 });
 
@@ -50,7 +53,10 @@ test('chat startup checks the local image before pulling and never builds automa
   ]);
   const packageJson = JSON.parse(packageText);
   assert.equal(packageJson.scripts.chat, 'node scripts/start-chat.mjs');
+  assert.equal(packageJson.scripts['chat:logs'], 'docker compose -f docker/docker-compose.chat.yml logs -f cityjson-chat');
+  assert.equal(packageJson.scripts['chat:stop'], 'docker compose -f docker/docker-compose.chat.yml down');
   assert.ok(startup.indexOf("['image', 'inspect', image]") < startup.indexOf("['pull', image]"));
+  assert.match(startup, /'up', '-d'/);
   assert.match(startup, /'--no-build'/);
   assert.doesNotMatch(compose, /^\s+build:/m);
 });

@@ -256,6 +256,42 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         return;
       }
 
+      const modelRoute = /^\/api\/models\/(model-[0-9a-f-]{36})$/.exec(url.pathname);
+      if (request.method === 'PUT' && modelRoute) {
+        const body = await readJson(request, 32 * 1024);
+        const id = clientKey(body.clientId);
+        const state = configurationFor(id);
+        const profile = state?.profiles.get(modelRoute[1]);
+        if (!profile) throw new Error('The selected model is unknown or has expired');
+        const selectedConfig = configuredModel(config, body, profile.config);
+        state.profiles.set(profile.id, {
+          ...profile,
+          config: selectedConfig,
+          client: createModelClient(selectedConfig, dependencies.fetchImpl || fetch)
+        });
+        state.updatedAt = Date.now();
+        clearClientSessions(id);
+        pruneState();
+        sendJson(response, 200, publicModelState(id));
+        return;
+      }
+
+      if (request.method === 'DELETE' && modelRoute) {
+        const body = await readJson(request, 32 * 1024);
+        const id = clientKey(body.clientId);
+        const state = configurationFor(id);
+        if (!state?.profiles.has(modelRoute[1])) throw new Error('The selected model is unknown or has expired');
+        state.profiles.delete(modelRoute[1]);
+        if (state.activeId === modelRoute[1]) {
+          state.activeId = defaultProfile?.id || state.profiles.keys().next().value || null;
+        }
+        state.updatedAt = Date.now();
+        clearClientSessions(id);
+        pruneState();
+        sendJson(response, 200, publicModelState(id));
+        return;
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/models/select') {
         const body = await readJson(request, 32 * 1024);
         const id = clientKey(body.clientId);

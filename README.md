@@ -52,9 +52,9 @@ Set these values before starting Datum:
 
 ```dotenv
 MODEL_PROVIDER=openai
-MODEL_NAME=deepseek-v4-pro
+MODEL_NAME=gemini-3.7-flash
 MODEL_API_KEY=replace-with-your-api-key
-MODEL_BASE_URL=https://api.deepseek.com
+MODEL_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 MODEL_TEMPERATURE=0.1
 ```
 
@@ -63,23 +63,47 @@ The model settings mean:
 | Variable | Required | Description |
 |---|---:|---|
 | `MODEL_PROVIDER` | yes | API request format. Use `openai` for OpenAI-compatible Chat Completions or `anthropic` for Anthropic Messages. This value describes the API format, not the model company. |
-| `MODEL_NAME` | yes | Exact model identifier sent to the provider, for example `deepseek-v4-pro`. The model must support tool calls. |
+| `MODEL_NAME` | yes | Exact model identifier sent to the provider, for example `gemini-3.7-flash`. The model must support tool calls. |
 | `MODEL_API_KEY` | yes | API credential issued by the model provider. Do not commit `.env`. |
 | `MODEL_BASE_URL` | yes | Base URL for the provider API. |
 | `MODEL_TEMPERATURE` | no | Sampling temperature. Datum defaults to `0.1`. |
 
 The `.env` model is the default model in Datum. Users can add other models from the model menu. Models added through the interface remain in server memory for up to eight hours. Their API keys are not returned to the browser or passed to MCP tools.
 
-### Recommended model and alternatives
+### Free model for testing
 
-`deepseek-v4-pro` is the recommended starting model because it supports tool calls and its published token prices are $0.435 per million uncached input tokens and $0.87 per million output tokens as of August 27, 2026. Check the [current DeepSeek pricing page](https://api-docs.deepseek.com/quick_start/pricing/) before use because prices can change.
+Gemini 3.7 Flash is the recommended model for initial testing. Google lists free input and output tokens for this model on the Gemini API free tier. The free tier has rate limits, availability depends on region, and Google states that free-tier content may be used to improve its products. Do not send confidential datasets through a free-tier account without reviewing the provider's data terms.
+
+Create and configure a Gemini API key:
+
+1. Open the [Google AI Studio API Keys page](https://aistudio.google.com/app/apikey). Google's [API key guide](https://ai.google.dev/gemini-api/docs/api-key) explains project and key management.
+2. Sign in and accept the Gemini API terms if prompted.
+3. Select **Create API key**. New keys created in AI Studio are restricted to the Gemini API.
+4. Copy the key.
+5. Create `.env` from `.env.example` and set:
+
+   ```dotenv
+   MODEL_PROVIDER=openai
+   MODEL_NAME=gemini-3.7-flash
+   MODEL_API_KEY=paste-your-gemini-api-key-here
+   MODEL_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+   MODEL_TEMPERATURE=0.1
+   ```
+
+6. Run `npm run chat`, open <http://127.0.0.1:3000>, import a CityJSON file, and select one of the suggested questions.
+
+The base URL above is Google's documented [OpenAI compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai), which is why `MODEL_PROVIDER` remains `openai`.
+
+Check the [Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricing) and [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits) because free-tier quotas can change.
+
+### Other model services
 
 Datum can use any model that supports tool calls through one of its two API formats. Examples:
 
 | Service | `MODEL_PROVIDER` | Example model | `MODEL_BASE_URL` |
 |---|---|---|---|
-| DeepSeek | `openai` | `deepseek-v4-pro` | `https://api.deepseek.com` |
 | Google Gemini | `openai` | `gemini-3.7-flash` | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| DeepSeek | `openai` | `deepseek-v4-pro` | `https://api.deepseek.com` |
 | OpenAI GPT | `openai` | a current GPT model with Chat Completions tool calling | `https://api.openai.com/v1` |
 | Anthropic Claude | `anthropic` | a current Claude model with tool use | `https://api.anthropic.com` |
 
@@ -98,11 +122,18 @@ npm run chat
 
 Open <http://127.0.0.1:3000>.
 
+The command starts the container in detached mode and returns to the terminal. Use these commands to view logs or stop the application:
+
+```bash
+npm run chat:logs
+npm run chat:stop
+```
+
 `npm run chat` uses this image-selection sequence:
 
 1. Check whether `yarroudh/cityjson-mcp:latest` exists locally.
 2. Pull it from Docker Hub only when it is not available locally.
-3. Start the chat application without building an image.
+3. Start the chat application in detached mode without building an image.
 
 The application binds to `127.0.0.1:3000`. Docker volumes store imported files and derived datasets.
 

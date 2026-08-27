@@ -6,7 +6,7 @@
   <meta name="description" content="Datum is a web application for exploring CityJSON datasets through a conversational interface. Import a CityJSON file to ask questions about its contents, or run any connected CityJSON tool.">
   <title>Datum</title>
   <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=6">
+  <link rel="stylesheet" href="/styles.css?v=7">
 </head>
 <body>
   <div class="app" id="app" data-theme="dark">
@@ -139,15 +139,15 @@
     <dialog class="modal" id="model-dialog">
       <form class="modal-card model-form" id="model-form">
         <header class="modal-header">
-          <div><span class="modal-kicker">Model</span><h2>Add a model</h2></div>
+          <div><span class="modal-kicker">Model</span><h2 id="model-dialog-title">Add a model</h2></div>
           <button class="modal-close" id="model-dialog-close" type="button" aria-label="Close">×</button>
         </header>
-        <p class="modal-intro">Add an Anthropic Messages or OpenAI-compatible model. Credentials stay in the running application and are never displayed after saving.</p>
+        <p class="modal-intro" id="model-dialog-intro">Add an Anthropic Messages or OpenAI-compatible model. Credentials stay in the running application and are never displayed after saving.</p>
         <label class="field"><span>API style</span><select id="model-provider" required><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
-        <label class="field"><span>Model name</span><input id="model-name" type="text" maxlength="200" autocomplete="off" required placeholder="e.g. deepseek-v4-pro"></label>
+        <label class="field"><span>Model name</span><input id="model-name" type="text" maxlength="200" autocomplete="off" required placeholder="e.g. gemini-3.7-flash"></label>
         <label class="field"><span>API key</span><input id="model-api-key" type="password" maxlength="10000" autocomplete="new-password" required placeholder="Enter the API key"></label>
         <label class="field"><span>Base URL</span><input id="model-base-url" type="url" maxlength="2048" autocomplete="off" required placeholder="https://api.example.com"></label>
-        <footer class="modal-actions"><button class="stub-button" id="model-cancel" type="button">Cancel</button><button class="stub-button primary" type="submit">Use this model</button></footer>
+        <footer class="modal-actions"><button class="stub-button" id="model-cancel" type="button">Cancel</button><button class="stub-button primary" type="submit"><span id="model-submit-label">Use this model</span></button></footer>
       </form>
     </dialog>
 
@@ -176,6 +176,6 @@
       </article>
     </dialog>
   </div>
-  <script type="module" src="/app.js?v=6"></script>
+  <script type="module" src="/app.js?v=7"></script>
 </body>
 </html>

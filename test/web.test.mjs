@@ -91,8 +91,8 @@ test('model behavior is low-temperature and suppresses emoji output', () => {
 
 test('HTML versions application assets to prevent cached UI mismatches', async () => {
   const html = await fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8');
-  assert.match(html, /styles\.css\?v=6/);
-  assert.match(html, /app\.js\?v=6/);
+  assert.match(html, /styles\.css\?v=7/);
+  assert.match(html, /app\.js\?v=7/);
   assert.match(html, /favicon\.svg\?v=1/);
 });
 
@@ -190,7 +190,7 @@ test('chat turns prepare a derived dataset when the user asks for a download', a
   assert.equal(resources[0].filename, 'subset.city.json');
 });
 
-test('chat API keeps multiple model profiles and downloads imported datasets', async t => {
+test('chat API adds, edits, selects, and deletes model profiles and downloads imported datasets', async t => {
   const input = await fs.mkdtemp(path.join(os.tmpdir(), 'datum-api-test-'));
   const sample = await fs.readFile(samplePath);
   const gateway = {
@@ -247,11 +247,32 @@ test('chat API keeps multiple model profiles and downloads imported datasets', a
   assert.equal(added.models.length, 2);
   assert.equal(added.model, 'claude-test');
   assert.equal('apiKey' in added, false);
+  const customModel = added.models.find(model => !model.isDefault);
+  assert.ok(customModel);
+
+  const editedResponse = await applicationRequest(app.server, 'PUT', `/api/models/${customModel.id}`, {
+    clientId,
+    provider: 'openai',
+    model: 'edited-model',
+    apiKey: '',
+    baseUrl: 'https://example.test/v1'
+  });
+  assert.equal(editedResponse.status, 200);
+  const edited = JSON.parse(editedResponse.body);
+  assert.equal(edited.model, 'edited-model');
+  assert.equal(edited.models.find(model => model.id === customModel.id).baseUrl, 'https://example.test/v1');
+  assert.equal('apiKey' in edited.models.find(model => model.id === customModel.id), false);
 
   const selectedResult = await applicationRequest(app.server, 'POST', '/api/models/select', { clientId, modelId: 'default' });
   const selected = JSON.parse(selectedResult.body);
   assert.equal(selected.activeModelId, 'default');
   assert.equal(selected.models.length, 2);
+
+  const deletedResult = await applicationRequest(app.server, 'DELETE', `/api/models/${customModel.id}`, { clientId });
+  assert.equal(deletedResult.status, 200);
+  const deleted = JSON.parse(deletedResult.body);
+  assert.equal(deleted.activeModelId, 'default');
+  assert.equal(deleted.models.length, 1);
 
   const preparedResult = await applicationRequest(app.server, 'POST', '/api/datasets/download', { datasetId: 'cj_imported' });
   const prepared = JSON.parse(preparedResult.body);

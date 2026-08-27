@@ -27,7 +27,7 @@ if (inspected.error?.code === 'ENOENT') {
 
 if (!process.exitCode) {
   const result = docker(
-    ['compose', '-f', composeFile, 'up', '--no-build', '--pull', 'never'],
+    ['compose', '-f', composeFile, 'up', '-d', '--no-build', '--pull', 'never'],
     { stdio: 'inherit', env: { ...process.env, CITYJSON_MCP_IMAGE: image } }
   );
   if (result.error?.code === 'ENOENT') console.error('Docker is not installed or is not available on PATH.');
