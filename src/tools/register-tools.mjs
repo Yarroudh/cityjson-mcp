@@ -83,27 +83,35 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_download', {
     title: 'Download CityJSON content',
-    description: 'Return the complete JSON text of an opened or transformed dataset as an embedded application/json resource so the client can save or present it as a downloadable file.',
+    description: 'Prepare an opened or transformed dataset for download. The web host streams the managed file directly; standalone MCP clients receive an embedded application/json resource within the configured inline-size limit.',
     inputSchema: z.object({
       dataset_id: datasetId,
       filename: z.string().min(1).max(200).optional().describe('Optional suggested download filename.')
     })
   }, safe(async ({ dataset_id, filename }) => {
-    const result = await dm.downloadContent(dataset_id, filename);
+    const reference = await dm.downloadReference(dataset_id, filename);
+    const webHost = process.env.CITYJSON_MCP_WEB_HOST === '1';
+    const inlineLimit = Number(process.env.CITYJSON_MCP_MAX_DOWNLOAD_BYTES || 25 * 1024 * 1024);
+    if (!webHost && reference.sizeBytes > inlineLimit) {
+      throw new Error(`Downloaded CityJSON exceeds the ${inlineLimit}-byte inline MCP limit`);
+    }
+    const result = webHost ? reference : await dm.downloadContent(dataset_id, filename);
     const metadata = { datasetId: result.datasetId, filename: result.filename, mimeType: result.mimeType, sizeBytes: result.sizeBytes };
+    const content = [
+      { type: 'text', text: JSON.stringify(metadata, null, 2) },
+      { type: 'resource_link', uri: `cityjson://download/${encodeURIComponent(result.filename)}`, name: result.filename, mimeType: result.mimeType, size: result.sizeBytes }
+    ];
+    if (typeof result.content === 'string') content.push({
+      type: 'resource',
+      resource: {
+        uri: `cityjson://download/${encodeURIComponent(result.filename)}`,
+        mimeType: result.mimeType,
+        text: result.content
+      }
+    });
     return {
-      content: [
-        { type: 'text', text: JSON.stringify(metadata, null, 2) },
-        {
-          type: 'resource',
-          resource: {
-            uri: `cityjson://download/${encodeURIComponent(result.filename)}`,
-            mimeType: result.mimeType,
-            text: result.content
-          }
-        }
-      ],
-      structuredContent: metadata
+      content,
+      structuredContent: { ...metadata, ...(webHost ? { _hostPath: reference.path } : {}) }
     };
   }));
 

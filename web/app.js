@@ -1,7 +1,13 @@
+import { marked } from '/vendor/marked.esm.js';
+import DOMPurify from '/vendor/purify.es.mjs';
+
+marked.setOptions({ gfm: true, breaks: true });
+
 const elements = {
   app: document.querySelector('#app'),
   fileInput: document.querySelector('#file-input'),
   importButton: document.querySelector('#import-button'),
+  modelSettingsButton: document.querySelector('#model-settings-button'),
   dropzone: document.querySelector('#dropzone'),
   sidebarEmpty: document.querySelector('#sidebar-empty'),
   conversationList: document.querySelector('#conversation-list'),
@@ -16,10 +22,7 @@ const elements = {
   message: document.querySelector('#message'),
   sendButton: document.querySelector('#send-button'),
   modelTrigger: document.querySelector('#model-trigger'),
-  modelMenu: document.querySelector('#model-menu'),
   modelLabel: document.querySelector('#model-label'),
-  modelMenuName: document.querySelector('#model-menu-name'),
-  modelMenuProvider: document.querySelector('#model-menu-provider'),
   toolsTrigger: document.querySelector('#tools-trigger'),
   toolsMenu: document.querySelector('#tools-menu'),
   toolCount: document.querySelector('#tool-count'),
@@ -31,7 +34,20 @@ const elements = {
   importStatus: document.querySelector('#import-status'),
   errorBanner: document.querySelector('#error-banner'),
   errorMessage: document.querySelector('#error-message'),
-  dismissError: document.querySelector('#dismiss-error')
+  dismissError: document.querySelector('#dismiss-error'),
+  modelDialog: document.querySelector('#model-dialog'),
+  modelForm: document.querySelector('#model-form'),
+  modelDialogClose: document.querySelector('#model-dialog-close'),
+  modelCancel: document.querySelector('#model-cancel'),
+  modelProvider: document.querySelector('#model-provider'),
+  modelName: document.querySelector('#model-name'),
+  modelApiKey: document.querySelector('#model-api-key'),
+  modelBaseUrl: document.querySelector('#model-base-url'),
+  toolDialog: document.querySelector('#tool-dialog'),
+  toolDialogClose: document.querySelector('#tool-dialog-close'),
+  toolDialogName: document.querySelector('#tool-dialog-name'),
+  toolDialogDescription: document.querySelector('#tool-dialog-description'),
+  toolDialogParameters: document.querySelector('#tool-dialog-parameters')
 };
 
 let conversations = [];
@@ -41,6 +57,17 @@ let importing = false;
 let runtimeConfig = null;
 let sequence = 1;
 let dragDepth = 0;
+let clientId;
+
+try {
+  clientId = sessionStorage.getItem('datum-client-id');
+  if (!clientId) {
+    clientId = crypto.randomUUID();
+    sessionStorage.setItem('datum-client-id', clientId);
+  }
+} catch {
+  clientId = crypto.randomUUID();
+}
 
 function activeConversation() {
   return conversations.find(conversation => conversation.id === activeId) || null;
@@ -172,6 +199,22 @@ function renderConversationList() {
   }
 }
 
+function renderMarkdown(source) {
+  const container = document.createElement('div');
+  container.className = 'message-content markdown';
+  const rendered = marked.parse(String(source || ''));
+  container.innerHTML = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
+  for (const link of container.querySelectorAll('a')) {
+    if (!['http:', 'https:'].includes(new URL(link.href, location.href).protocol)) {
+      link.removeAttribute('href');
+      continue;
+    }
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+  }
+  return container;
+}
+
 function renderMessage(message) {
   const row = document.createElement('div');
   row.className = `row ${message.role}`;
@@ -180,7 +223,12 @@ function renderMessage(message) {
   const label = document.createElement('span');
   label.className = 'bubble-label';
   label.textContent = message.role === 'user' ? 'you' : 'assistant';
-  bubble.append(label, document.createTextNode(message.content));
+  const content = message.role === 'assistant' ? renderMarkdown(message.content) : document.createElement('div');
+  if (message.role !== 'assistant') {
+    content.className = 'message-content';
+    content.textContent = message.content;
+  }
+  bubble.append(label, content);
 
   if (message.file) {
     const files = document.createElement('div');
@@ -188,7 +236,7 @@ function renderMessage(message) {
     const chip = document.createElement('span');
     chip.textContent = `${message.file.name} · ${formatBytes(message.file.sizeBytes)}`;
     files.append(chip);
-    bubble.insertBefore(files, bubble.childNodes[1]);
+    bubble.insertBefore(files, content);
   }
 
   if (message.trace?.length) {
@@ -204,6 +252,20 @@ function renderMessage(message) {
     }
     details.append(summary, list);
     bubble.append(details);
+  }
+
+  if (message.downloads?.length) {
+    const downloads = document.createElement('div');
+    downloads.className = 'download-list';
+    for (const download of message.downloads) {
+      const link = document.createElement('a');
+      link.className = 'download-button';
+      link.href = download.url;
+      link.download = download.filename;
+      link.textContent = `↓ ${download.filename} · ${formatBytes(download.sizeBytes)}`;
+      downloads.append(link);
+    }
+    bubble.append(downloads);
   }
   row.append(bubble);
   return row;
@@ -239,9 +301,12 @@ function renderActiveConversation() {
     elements.thread.append(row);
   }
 
-  const unavailable = Boolean(sendingId) || importing;
+  const modelUnavailable = runtimeConfig?.modelConfigured === false;
+  const unavailable = Boolean(sendingId) || importing || modelUnavailable;
   elements.message.disabled = unavailable;
-  elements.message.placeholder = unavailable ? 'Waiting on a reply…' : 'Ask about the model, or request a tool action…';
+  elements.message.placeholder = modelUnavailable
+    ? 'Configure a model to start chatting…'
+    : unavailable ? 'Waiting on a reply…' : 'Ask about the model, or request a tool action…';
   elements.sendButton.disabled = unavailable || !elements.message.value.trim();
   requestAnimationFrame(() => { elements.thread.scrollTop = elements.thread.scrollHeight; });
 }
@@ -252,13 +317,74 @@ function render() {
   elements.importButton.disabled = importing;
 }
 
+function shortDescription(description) {
+  const text = String(description || 'No description available.').trim();
+  const sentence = /^(.+?[.!?])(?:\s|$)/.exec(text);
+  return sentence ? sentence[1] : text;
+}
+
+function schemaType(schema) {
+  if (Array.isArray(schema?.type)) return schema.type.join(' | ');
+  if (schema?.type === 'array') return `array<${schemaType(schema.items) || 'value'}>`;
+  if (schema?.type) return schema.type;
+  if (Array.isArray(schema?.enum)) return schema.enum.map(value => JSON.stringify(value)).join(' | ');
+  if (Array.isArray(schema?.anyOf)) return schema.anyOf.map(schemaType).filter(Boolean).join(' | ');
+  return 'value';
+}
+
+function showToolDocumentation(tool) {
+  elements.toolDialogName.textContent = tool.name;
+  elements.toolDialogDescription.textContent = tool.description || 'No additional documentation is available for this action.';
+  elements.toolDialogParameters.replaceChildren();
+  const properties = tool.inputSchema?.properties || {};
+  const required = new Set(tool.inputSchema?.required || []);
+  if (Object.keys(properties).length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'parameter';
+    empty.textContent = 'This action has no parameters.';
+    elements.toolDialogParameters.append(empty);
+  }
+  for (const [name, schema] of Object.entries(properties)) {
+    const row = document.createElement('div');
+    row.className = 'parameter';
+    const heading = document.createElement('div');
+    heading.className = 'parameter-name';
+    const code = document.createElement('code');
+    code.textContent = name;
+    heading.append(code);
+    if (required.has(name)) {
+      const marker = document.createElement('span');
+      marker.className = 'parameter-required';
+      marker.textContent = 'required';
+      heading.append(marker);
+    }
+    const detail = document.createElement('div');
+    detail.className = 'parameter-detail';
+    const type = document.createElement('span');
+    type.className = 'parameter-type';
+    type.textContent = schemaType(schema);
+    const description = document.createElement('span');
+    const defaultText = schema.default === undefined ? '' : ` Default: ${JSON.stringify(schema.default)}.`;
+    description.textContent = `${schema.description || 'No description.'}${defaultText}`;
+    detail.append(type, description);
+    row.append(heading, detail);
+    elements.toolDialogParameters.append(row);
+  }
+  elements.toolDialog.showModal();
+}
+
+function openModelDialog() {
+  elements.modelProvider.value = runtimeConfig?.provider || 'openai';
+  elements.modelName.value = runtimeConfig?.model || '';
+  elements.modelApiKey.value = '';
+  elements.modelBaseUrl.value = runtimeConfig?.baseUrl || '';
+  elements.modelDialog.showModal();
+}
+
 function configureRuntime(config) {
   runtimeConfig = config;
-  const modelName = config.model || 'No model configured';
-  const providerName = config.provider ? `${config.provider[0].toUpperCase()}${config.provider.slice(1)}` : 'Unknown provider';
+  const modelName = config.modelConfigured ? config.model : 'Configure model';
   elements.modelLabel.textContent = modelName;
-  elements.modelMenuName.textContent = modelName;
-  elements.modelMenuProvider.textContent = `${providerName} · API key loaded server-side`;
   elements.toolCount.textContent = `· ${config.toolCount}`;
   const backendEntries = Object.values(config.backends || {});
   const availableBackends = backendEntries.filter(backend => backend?.available === true).length;
@@ -269,12 +395,23 @@ function configureRuntime(config) {
   elements.backendStatus.classList.toggle('partial', availableBackends !== backendEntries.length);
   elements.toolList.replaceChildren();
   for (const tool of config.tools || []) {
-    const action = document.createElement('div');
+    const action = document.createElement('button');
+    action.type = 'button';
     action.className = 'connector-action';
-    action.textContent = tool.title || tool.name;
-    action.title = tool.name;
+    const name = document.createElement('code');
+    name.className = 'tool-name';
+    name.textContent = tool.name;
+    const description = document.createElement('span');
+    description.className = 'tool-summary';
+    description.textContent = shortDescription(tool.description);
+    action.append(name, description);
+    action.addEventListener('click', () => {
+      elements.toolsMenu.hidden = true;
+      showToolDocumentation(tool);
+    });
     elements.toolList.append(action);
   }
+  render();
 }
 
 async function importOneFile(file) {
@@ -346,12 +483,13 @@ async function sendMessage() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         sessionId: active.sessionId,
+        clientId,
         message: text,
         batchId: usedInitialBatch ? active.batchId : undefined
       })
     });
     active.batchPending = false;
-    active.messages.push({ role: 'assistant', content: result.message, trace: result.trace });
+    active.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
   } catch (error) {
     showError(`Reply failed: ${error.message}`);
   } finally {
@@ -361,10 +499,9 @@ async function sendMessage() {
   }
 }
 
-function toggleMenu(menu, other) {
+function toggleMenu(menu) {
   const willOpen = menu.hidden;
   menu.hidden = !willOpen;
-  other.hidden = true;
 }
 
 elements.importButton.addEventListener('click', () => elements.fileInput.click());
@@ -388,20 +525,64 @@ elements.message.addEventListener('keydown', event => {
   }
 });
 
-elements.modelTrigger.addEventListener('click', event => {
-  event.stopPropagation();
-  toggleMenu(elements.modelMenu, elements.toolsMenu);
-});
+elements.modelSettingsButton.addEventListener('click', openModelDialog);
+elements.modelTrigger.addEventListener('click', openModelDialog);
 elements.toolsTrigger.addEventListener('click', event => {
   event.stopPropagation();
-  toggleMenu(elements.toolsMenu, elements.modelMenu);
+  toggleMenu(elements.toolsMenu);
 });
 document.addEventListener('click', () => {
-  elements.modelMenu.hidden = true;
   elements.toolsMenu.hidden = true;
 });
-elements.modelMenu.addEventListener('click', event => event.stopPropagation());
 elements.toolsMenu.addEventListener('click', event => event.stopPropagation());
+
+elements.modelDialogClose.addEventListener('click', () => elements.modelDialog.close());
+elements.modelCancel.addEventListener('click', () => elements.modelDialog.close());
+elements.toolDialogClose.addEventListener('click', () => elements.toolDialog.close());
+for (const dialog of [elements.modelDialog, elements.toolDialog]) {
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog) dialog.close();
+  });
+}
+elements.modelProvider.addEventListener('change', () => {
+  const defaults = {
+    openai: 'https://api.openai.com/v1',
+    anthropic: 'https://api.anthropic.com'
+  };
+  elements.modelBaseUrl.value = defaults[elements.modelProvider.value];
+});
+elements.modelForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const submit = elements.modelForm.querySelector('[type="submit"]');
+  submit.disabled = true;
+  hideError();
+  try {
+    const selected = await requestJson('/api/model/configure', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        clientId,
+        provider: elements.modelProvider.value,
+        model: elements.modelName.value,
+        apiKey: elements.modelApiKey.value,
+        baseUrl: elements.modelBaseUrl.value
+      })
+    });
+    configureRuntime({ ...runtimeConfig, ...selected });
+    for (const conversation of conversations) conversation.messages.push({
+      role: 'assistant',
+      content: `Model changed to **${selected.model}**. The next message starts a fresh model session for this conversation.`,
+      synthetic: true
+    });
+    elements.modelDialog.close();
+    render();
+  } catch (error) {
+    showError(`Model configuration failed: ${error.message}`);
+  } finally {
+    submit.disabled = false;
+    elements.modelApiKey.value = '';
+  }
+});
 
 elements.themeToggle.addEventListener('click', () => {
   const theme = elements.app.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -433,7 +614,10 @@ try {
   if (savedTheme === 'light' || savedTheme === 'dark') elements.app.dataset.theme = savedTheme;
 } catch {}
 
-requestJson('/api/config')
-  .then(configureRuntime)
+requestJson(`/api/config?clientId=${encodeURIComponent(clientId)}`)
+  .then(config => {
+    configureRuntime(config);
+    if (!config.modelConfigured) openModelDialog();
+  })
   .catch(error => showError(`Configuration failed: ${error.message}`));
 render();

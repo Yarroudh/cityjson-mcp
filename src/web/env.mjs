@@ -43,14 +43,13 @@ function booleanValue(value, fallback, name) {
 export function getWebConfig(env = process.env) {
   const provider = (env.MODEL_PROVIDER || 'anthropic').toLowerCase();
   if (!['anthropic', 'openai'].includes(provider)) throw new Error('MODEL_PROVIDER must be anthropic or openai');
-  const apiKey = env.MODEL_API_KEY || (provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY);
-  if (!apiKey) throw new Error(`Set MODEL_API_KEY or ${provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'}`);
-  if (!env.MODEL_NAME) throw new Error('Set MODEL_NAME to a tool-capable model ID');
+  const apiKey = env.MODEL_API_KEY || (provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY) || null;
+  const model = env.MODEL_NAME?.trim() || null;
 
   return {
     provider,
     apiKey,
-    model: env.MODEL_NAME,
+    model,
     baseUrl: env.MODEL_BASE_URL || (provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'),
     maxOutputTokens: positiveInteger(env.MODEL_MAX_OUTPUT_TOKENS, 4096, 'MODEL_MAX_OUTPUT_TOKENS'),
     maxToolRounds: positiveInteger(env.CHAT_MAX_TOOL_ROUNDS, 12, 'CHAT_MAX_TOOL_ROUNDS'),

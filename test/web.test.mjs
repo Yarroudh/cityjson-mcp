@@ -9,7 +9,7 @@ import { createModelClient } from '../src/web/model-client.mjs';
 import { receiveUploads } from '../src/web/uploads.mjs';
 import { McpGateway } from '../src/web/mcp-gateway.mjs';
 import { getWebConfig } from '../src/web/env.mjs';
-import { createChatApplication } from '../src/web/server.mjs';
+import { configuredModel, createChatApplication, ensureRequestedDownloads } from '../src/web/server.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const samplePath = path.join(projectRoot, 'examples', 'minimal.city.json');
@@ -36,6 +36,36 @@ test('provider rejects values that are not supported API styles', () => {
     MODEL_NAME: 'deepseek-v4-pro',
     MODEL_API_KEY: 'test'
   }), /MODEL_PROVIDER must be anthropic or openai/);
+});
+
+test('chat host can start its configuration flow without model credentials', () => {
+  const config = getWebConfig({});
+  assert.equal(config.model, null);
+  assert.equal(config.apiKey, null);
+});
+
+test('HTML versions application assets to prevent cached UI mismatches', async () => {
+  const html = await fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8');
+  assert.match(html, /styles\.css\?v=2/);
+  assert.match(html, /app\.js\?v=2/);
+});
+
+test('user model configuration changes API settings without requiring the existing key again', () => {
+  const base = getWebConfig({
+    MODEL_PROVIDER: 'openai',
+    MODEL_NAME: 'default-model',
+    MODEL_API_KEY: 'existing-secret'
+  });
+  const selected = configuredModel(base, {
+    provider: 'anthropic',
+    model: 'claude-test',
+    apiKey: '',
+    baseUrl: 'https://api.anthropic.com/'
+  });
+  assert.equal(selected.provider, 'anthropic');
+  assert.equal(selected.model, 'claude-test');
+  assert.equal(selected.baseUrl, 'https://api.anthropic.com');
+  assert.equal(selected.apiKey, 'existing-secret');
 });
 
 test('chat startup refuses to advertise a toolbox whose backends are unavailable', async t => {
@@ -72,6 +102,22 @@ test('chat startup refuses to advertise a toolbox whose backends are unavailable
     /requires the complete CityJSON backend bundle.*cjval.*val3dity/
   );
   assert.equal(closed, true);
+});
+
+test('chat turns prepare a derived dataset when the user asks for a download', async () => {
+  const calls = [];
+  const gateway = {
+    async call(name, args) {
+      calls.push({ name, args });
+      return {
+        isError: false,
+        downloads: [{ filename: 'subset.city.json', mimeType: 'application/json', sizeBytes: 123, path: samplePath }]
+      };
+    }
+  };
+  const resources = await ensureRequestedDownloads('Create a Building subset and download it.', 'cj_derived', [], gateway);
+  assert.deepEqual(calls, [{ name: 'cityjson_download', args: { dataset_id: 'cj_derived' } }]);
+  assert.equal(resources[0].filename, 'subset.city.json');
 });
 
 test('Anthropic model adapter relays tool calls and results', async () => {
@@ -161,8 +207,16 @@ test('web MCP gateway discovers tools and imports from the inbox over stdio', as
   });
 
   await gateway.connect();
-  assert.ok(gateway.tools.some(tool => tool.name === 'cityjson_import'));
+  const importTool = gateway.tools.find(tool => tool.name === 'cityjson_import');
+  assert.ok(importTool);
+  assert.match(importTool.description, /input inbox/);
+  assert.equal(importTool.inputSchema.type, 'object');
   const imported = await gateway.call('cityjson_import', { filename: 'gateway.city.json' });
   assert.equal(imported.isError, false);
   assert.equal(imported.structuredContent.cityObjectCount, 2);
+  const downloaded = await gateway.call('cityjson_download', { dataset_id: imported.structuredContent.datasetId });
+  assert.equal(downloaded.isError, false);
+  assert.equal(downloaded.downloads.length, 1);
+  assert.equal(downloaded.modelContent.includes('_hostPath'), false);
+  assert.deepEqual(JSON.parse(await fs.readFile(downloaded.downloads[0].path, 'utf8')), JSON.parse(await fs.readFile(samplePath, 'utf8')));
 });

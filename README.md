@@ -106,7 +106,7 @@ Each transformation returns a new `dataset_id`, so intermediate states remain av
 
 The included DATUM chat application is the simplest attachment workflow. It streams each browser attachment to `CITYJSON_MCP_INPUT`, imports it through the live MCP server, and gives the model only the resulting `dataset_id` and summary.
 
-Create a local environment file:
+You can optionally preconfigure a default model in a local environment file:
 
 ```bash
 cp .env.example .env
@@ -121,7 +121,9 @@ MODEL_API_KEY=your-api-key
 MODEL_BASE_URL=https://api.deepseek.com
 ```
 
-`MODEL_PROVIDER` deliberately accepts `anthropic` or `openai` because it selects the API protocol, not the company serving the model. `anthropic` uses Messages; `openai` uses OpenAI-compatible Chat Completions and therefore also supports compatible services such as DeepSeek through `MODEL_BASE_URL`. The key is used only by the server and is never returned to the browser or passed to an MCP tool.
+This file is optional: the model, provider, API key, and base URL can also be entered in the application's **Configure model** dialog. Dialog credentials are held only in server memory for the browser session and are never returned to the browser or passed to an MCP tool.
+
+`MODEL_PROVIDER` accepts `anthropic` or `openai` because it selects the API protocol, not the company serving the model. `anthropic` uses Messages; `openai` uses OpenAI-compatible Chat Completions and therefore also supports compatible services such as DeepSeek through `MODEL_BASE_URL`.
 
 Run the complete application. This is the default because the image contains `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`:
 
@@ -142,7 +144,7 @@ browser multipart stream → input inbox → cityjson_import → dataset_id → 
 docker compose -f docker/docker-compose.chat.yml up --build
 ```
 
-The Compose configuration binds the application only to `127.0.0.1`, keeps input/workspace data in Docker volumes, and reads the model configuration from `.env`.
+The Compose configuration binds the application only to `127.0.0.1` and keeps input/workspace data in Docker volumes. It reads an optional default model from `.env`; otherwise the application opens the model configuration dialog.
 
 For development on a host where all five executables are already installed, use `npm run chat:host`. Host mode performs a backend readiness check and refuses to advertise a non-functional toolbox. `CHAT_ALLOW_PARTIAL_BACKENDS=true` overrides that check only for deliberate inspection-only development.
 
@@ -510,7 +512,7 @@ flowchart LR
 | `cityjson_import_text` | native | Small-text fallback for programmatic clients; content travels through MCP JSON. | `content`, optional `filename` |
 | `cityjson_open` | native | Opens a regular CityJSON JSON file and returns a `dataset_id` plus structural summary. | `source` |
 | `cityjson_upload` | native | Deprecated compatibility alias of `cityjson_import_text`; not a binary upload. | `content`, optional `filename` |
-| `cityjson_download` | native | Returns an opened or transformed model as an embedded JSON resource for saving/downloading. | `dataset_id`, optional `filename` |
+| `cityjson_download` | native | Prepares an opened or transformed model for direct web streaming or an inline MCP download. | `dataset_id`, optional `filename` |
 | `cityjson_info` | native | Summarizes type/version, object counts, LoDs, attributes, metadata, transform and extensions. | `dataset_id` |
 | `cityjson_save` | native | Copies an opened/derived dataset to an explicit authorized path. | `dataset_id`, `destination`, `overwrite` |
 
@@ -554,7 +556,7 @@ Use this to retrieve a source or transformed dataset when the container has no h
 }
 ```
 
-The tool returns the model as an embedded `application/json` MCP resource with download metadata. Downloads default to a 25 MiB limit; configure `CITYJSON_MCP_MAX_DOWNLOAD_BYTES` to change it.
+In DATUM, the host streams the immutable workspace file directly and presents a download button, so large results do not pass through model context or MCP JSON. Standalone MCP clients receive an embedded `application/json` resource; that inline path defaults to a 25 MiB limit controlled by `CITYJSON_MCP_MAX_DOWNLOAD_BYTES`.
 
 Representative result:
 

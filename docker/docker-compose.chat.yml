@@ -6,7 +6,8 @@ services:
     image: yarroudh/cityjson-mcp:latest
     entrypoint: ["node", "/app/src/web/server.mjs"]
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       CHAT_HOST: 0.0.0.0
       CITYJSON_MCP_INPUT: /input

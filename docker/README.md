@@ -59,13 +59,15 @@ Use inbox filenames with `cityjson_import`; `cityjson_list_imports` discovers th
 
 `cityjson_import_text` is available only for small JSON documents already present as text; its deprecated `cityjson_upload` alias is not a real attachment upload. Chat paths such as `/mnt/user-data/...` do not exist inside this container.
 
-For direct browser attachments, configure `MODEL_PROVIDER`, `MODEL_NAME`, and `MODEL_API_KEY` in the repository `.env`, then start the included one-page chat application:
+For direct browser attachments, start the included one-page chat application:
 
 ```bash
 npm run chat
 ```
 
 Open <http://127.0.0.1:3000>. The application streams attachments into `/input`, calls `cityjson_import` over MCP, and sends only the returned dataset handle to the model.
+
+Configure the model from the page, or optionally provide a default with `MODEL_PROVIDER`, `MODEL_NAME`, `MODEL_API_KEY`, and `MODEL_BASE_URL` in the repository `.env`.
 
 A local PostGIS development database for `cjdb` is available with:
 

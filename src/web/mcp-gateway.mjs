@@ -7,13 +7,19 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 function childEnvironment() {
   const modelSecrets = new Set(['MODEL_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']);
-  return Object.fromEntries(Object.entries(process.env).filter(([key, value]) => typeof value === 'string' && !modelSecrets.has(key)));
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key, value]) => typeof value === 'string' && !modelSecrets.has(key))),
+    CITYJSON_MCP_WEB_HOST: '1'
+  };
 }
 
 function modelSafeResult(result, maxChars) {
   let value;
   if (result.structuredContent !== undefined) {
-    value = JSON.stringify(result.structuredContent);
+    const structured = result.structuredContent && typeof result.structuredContent === 'object'
+      ? Object.fromEntries(Object.entries(result.structuredContent).filter(([key]) => !key.startsWith('_')))
+      : result.structuredContent;
+    value = JSON.stringify(structured);
   } else {
     value = (result.content || []).map(item => {
       if (item.type === 'text') return item.text;
@@ -29,6 +35,25 @@ function modelSafeResult(result, maxChars) {
   }
   if (value.length > maxChars) return `${value.slice(0, maxChars)}\n…[tool result truncated by chat host]`;
   return value;
+}
+
+function downloadableResources(result) {
+  if (typeof result.structuredContent?._hostPath === 'string') {
+    return [{
+      filename: result.structuredContent.filename || 'cityjson-download.json',
+      mimeType: result.structuredContent.mimeType || 'application/json',
+      sizeBytes: result.structuredContent.sizeBytes,
+      path: result.structuredContent._hostPath
+    }];
+  }
+  return (result.content || []).flatMap(item => {
+    if (item.type !== 'resource' || typeof item.resource?.text !== 'string') return [];
+    return [{
+      filename: item.resource.uri ? decodeURIComponent(item.resource.uri.split('/').at(-1)) : 'cityjson-download.json',
+      mimeType: item.resource.mimeType || 'application/octet-stream',
+      content: item.resource.text
+    }];
+  });
 }
 
 export class McpGateway {
@@ -60,7 +85,8 @@ export class McpGateway {
     return {
       isError: raw.isError === true,
       modelContent: modelSafeResult(raw, this.maxToolResultChars),
-      structuredContent: raw.structuredContent
+      structuredContent: raw.structuredContent,
+      downloads: downloadableResources(raw)
     };
   }
 

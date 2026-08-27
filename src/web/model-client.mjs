@@ -1,6 +1,7 @@
 const SYSTEM_PROMPT = `You are a CityJSON specialist operating the CityJSON Toolbox through MCP tools.
 Attachments are uploaded and imported by the chat host before you see the message. Their filenames, dataset IDs, and summaries are included in the user message. Use those dataset IDs directly; do not ask for file paths and do not call a text upload tool for an attachment.
-Use MCP tools whenever the request depends on a dataset. Prefer compact inspection and query tools instead of downloading complete models into context. Explain tool errors plainly and never invent a successful transformation.`;
+Use MCP tools whenever the request depends on a dataset. Prefer compact inspection and query tools instead of downloading complete models into context. Explain tool errors plainly and never invent a successful transformation.
+When the user asks to download, receive, or save a dataset locally, finish the requested transformation and then call cityjson_download on the resulting dataset in the same turn. Never stop at merely reporting a dataset_id when a downloadable file was requested.`;
 
 function apiUrl(baseUrl, pathname) {
   return `${baseUrl.replace(/\/$/, '')}${pathname}`;

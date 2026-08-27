@@ -81,15 +81,20 @@ export class DatasetManager {
   }
 
   async downloadContent(id, requestedFilename) {
-    const ds = this.get(id);
+    const reference = await this.downloadReference(id, requestedFilename);
     const maxBytes = Number(process.env.CITYJSON_MCP_MAX_DOWNLOAD_BYTES || 25 * 1024 * 1024);
-    const stat = await fs.stat(ds.path);
-    if (stat.size > maxBytes) throw new Error(`Downloaded CityJSON exceeds the ${maxBytes}-byte limit`);
-    const content = await fs.readFile(ds.path, 'utf8');
+    if (reference.sizeBytes > maxBytes) throw new Error(`Downloaded CityJSON exceeds the ${maxBytes}-byte inline MCP limit`);
+    const content = await fs.readFile(reference.path, 'utf8');
     parseCityJSON(content);
+    return { ...reference, content };
+  }
+
+  async downloadReference(id, requestedFilename) {
+    const ds = this.get(id);
+    const stat = await fs.stat(ds.path);
     const fallback = ds.filename || `${id}.city.json`;
     const filename = path.basename(requestedFilename || fallback).replace(/[^A-Za-z0-9._-]/g, '_') || `${id}.city.json`;
-    return { datasetId: id, filename, mimeType: 'application/json', sizeBytes: stat.size, content };
+    return { datasetId: id, filename, mimeType: 'application/json', sizeBytes: stat.size, path: ds.path };
   }
 
   get(id) {
