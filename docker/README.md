@@ -57,7 +57,7 @@ Claude Desktop can launch the published image over stdio. Replace the source pat
 
 Use inbox filenames with `cityjson_import`; `cityjson_list_imports` discovers them without exposing absolute paths. The mount is read only. Derived datasets and reports are written to `/data` inside Docker. Use `cityjson_download` to return a result to the client.
 
-`cityjson_import_text` is available only for small JSON documents already present as text; its deprecated `cityjson_upload` alias is not a real attachment upload. Chat paths such as `/mnt/user-data/...` do not exist inside this container.
+`cityjson_import_text` is available only for small JSON documents already present as text. Chat paths such as `/mnt/user-data/...` do not exist inside this container.
 
 For direct browser attachments, start the included one-page chat application:
 

@@ -4,6 +4,14 @@ Use MCP tools whenever the request depends on a dataset. Prefer compact inspecti
 When the user asks to download, receive, or save a dataset locally, finish the requested transformation and then call cityjson_download on the resulting dataset in the same turn. Never stop at merely reporting a dataset_id when a downloadable file was requested.
 Use concise, professional language. Never use emojis or emoticons.`;
 
+const CONNECTION_TEST_TOOL_NAME = 'datum_connection_test';
+const CONNECTION_TEST_PARAMETERS = {
+  type: 'object',
+  properties: { status: { type: 'string', enum: ['ok'] } },
+  required: ['status'],
+  additionalProperties: false
+};
+
 function apiUrl(baseUrl, pathname) {
   return `${baseUrl.replace(/\/$/, '')}${pathname}`;
 }
@@ -51,6 +59,32 @@ class AnthropicModelClient {
   constructor(config, fetchImpl) {
     this.config = config;
     this.fetch = fetchImpl;
+  }
+
+  async testConnection() {
+    const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/v1/messages'), {
+      method: 'POST',
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': this.config.apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: this.config.model,
+        max_tokens: Math.min(this.config.maxOutputTokens, 64),
+        temperature: this.config.temperature ?? 0.1,
+        messages: [{ role: 'user', content: `Call ${CONNECTION_TEST_TOOL_NAME} with status set to ok.` }],
+        tools: [{
+          name: CONNECTION_TEST_TOOL_NAME,
+          description: 'Confirm that this model configuration supports tool calls.',
+          input_schema: CONNECTION_TEST_PARAMETERS
+        }],
+        tool_choice: { type: 'tool', name: CONNECTION_TEST_TOOL_NAME }
+      })
+    });
+    const accepted = response.content?.some(item => item.type === 'tool_use' && item.name === CONNECTION_TEST_TOOL_NAME);
+    if (!accepted) throw new Error('The model responded, but it did not complete the required tool-call test');
   }
 
   async runTurn(history, message, tools, callTool) {
@@ -107,6 +141,36 @@ class OpenAIModelClient {
   constructor(config, fetchImpl) {
     this.config = config;
     this.fetch = fetchImpl;
+  }
+
+  async testConnection() {
+    const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), {
+      method: 'POST',
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${this.config.apiKey}`
+      },
+      body: JSON.stringify({
+        model: this.config.model,
+        messages: [{ role: 'user', content: `Call ${CONNECTION_TEST_TOOL_NAME} with status set to ok.` }],
+        tools: [{
+          type: 'function',
+          function: {
+            name: CONNECTION_TEST_TOOL_NAME,
+            description: 'Confirm that this model configuration supports tool calls.',
+            parameters: CONNECTION_TEST_PARAMETERS
+          }
+        }],
+        tool_choice: 'auto',
+        max_tokens: Math.min(this.config.maxOutputTokens, 64),
+        temperature: this.config.temperature ?? 0.1,
+        stream: false
+      })
+    });
+    const calls = response.choices?.[0]?.message?.tool_calls;
+    const accepted = calls?.some(item => item.type === 'function' && item.function?.name === CONNECTION_TEST_TOOL_NAME);
+    if (!accepted) throw new Error('The model responded, but it did not complete the required tool-call test');
   }
 
   async runTurn(history, message, tools, callTool) {

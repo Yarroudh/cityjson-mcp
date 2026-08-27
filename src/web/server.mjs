@@ -240,12 +240,14 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const body = await readJson(request, 32 * 1024);
         const id = clientKey(body.clientId);
         const selectedConfig = configuredModel(config, body, { ...config, apiKey: null });
+        const selectedClient = createModelClient(selectedConfig, dependencies.fetchImpl || fetch);
+        await selectedClient.testConnection();
         const modelId = `model-${crypto.randomUUID()}`;
         const state = configurationFor(id, true);
         state.profiles.set(modelId, {
           id: modelId,
           config: selectedConfig,
-          client: createModelClient(selectedConfig, dependencies.fetchImpl || fetch),
+          client: selectedClient,
           isDefault: false
         });
         state.activeId = modelId;
@@ -264,10 +266,12 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const profile = state?.profiles.get(modelRoute[1]);
         if (!profile) throw new Error('The selected model is unknown or has expired');
         const selectedConfig = configuredModel(config, body, profile.config);
+        const selectedClient = createModelClient(selectedConfig, dependencies.fetchImpl || fetch);
+        await selectedClient.testConnection();
         state.profiles.set(profile.id, {
           ...profile,
           config: selectedConfig,
-          client: createModelClient(selectedConfig, dependencies.fetchImpl || fetch)
+          client: selectedClient
         });
         state.updatedAt = Date.now();
         clearClientSessions(id);
@@ -341,8 +345,22 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         if (!message && !batch?.files.length) throw new Error('Enter a message or attach a CityJSON file');
         const userMessage = `${message || 'Inspect the attached CityJSON file and summarize it.'}${attachmentContext(batch?.files)}`;
         const storedSession = sessions.get(id);
-        const current = storedSession?.modelFingerprint === modelFingerprint ? storedSession : { history: [] };
-        let latestDatasetId = batch?.files.at(-1)?.summary?.datasetId || current.latestDatasetId;
+        const current = storedSession?.modelFingerprint === modelFingerprint
+          ? storedSession
+          : { history: [], turns: [] };
+        const retryTurn = Number.isSafeInteger(body.retryTurn) && body.retryTurn >= 0 ? body.retryTurn : null;
+        let history = current.history || [];
+        let turns = current.turns || [];
+        let previousDatasetId = current.latestDatasetId;
+        if (retryTurn !== null) {
+          const checkpoint = turns[retryTurn];
+          if (!checkpoint) throw new Error('This question can no longer be retried because its server-side conversation state has expired');
+          history = checkpoint.historyBefore;
+          previousDatasetId = checkpoint.latestDatasetIdBefore;
+          turns = turns.slice(0, retryTurn);
+        }
+        let latestDatasetId = batch?.files.at(-1)?.summary?.datasetId || previousDatasetId;
+        const checkpoint = { historyBefore: history, latestDatasetIdBefore: latestDatasetId };
         const resources = [];
         const callTool = async (name, args) => {
           const toolResult = await gateway.call(name, args);
@@ -353,7 +371,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           return toolResult;
         };
         const result = await selected.client.runTurn(
-          current.history || [],
+          history,
           userMessage,
           gateway.modelTools(selected.config.provider),
           callTool
@@ -364,7 +382,8 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           updatedAt: Date.now(),
           clientId: browserId,
           modelFingerprint,
-          latestDatasetId
+          latestDatasetId,
+          turns: [...turns, checkpoint]
         });
         pruneState();
         sendJson(response, 200, {

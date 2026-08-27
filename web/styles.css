@@ -24,6 +24,8 @@ button, textarea { font: inherit; }
   --button-bg-hover: #f0b56e;
   --button-text: #17120c;
   --user-bubble: #262932;
+  --user-line: #353944;
+  --user-text: #ece7da;
   --assistant-bubble: #1d1f26;
   --assistant-line: #30333d;
   --assistant-text: #e8e4da;
@@ -46,7 +48,9 @@ button, textarea { font: inherit; }
   --button-bg: #8b420f;
   --button-bg-hover: #6f3208;
   --button-text: #fffaf2;
-  --user-bubble: #262932;
+  --user-bubble: #ffffff;
+  --user-line: #d4cab3;
+  --user-text: #2a2620;
   --assistant-bubble: #f7f3e9;
   --assistant-line: #d4cab3;
   --assistant-text: #2a2620;
@@ -224,7 +228,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
   gap: 16px;
   padding: 22px 26px;
 }
-.row { display: flex; }
+.row { display: flex; align-items: flex-end; gap: 6px; }
 .row.user { justify-content: flex-end; }
 .row.assistant { justify-content: flex-start; }
 .bubble {
@@ -236,9 +240,15 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
   overflow-wrap: anywhere;
 }
 .bubble.assistant { color: var(--assistant-text); background: var(--assistant-bubble); border: 1px solid var(--assistant-line); border-top-left-radius: 0; }
-.bubble.user { color: var(--text-light); background: var(--user-bubble); border: 1px solid var(--panel-line); border-top-right-radius: 0; }
+.bubble.user { color: var(--user-text); background: var(--user-bubble); border: 1px solid var(--user-line); border-top-right-radius: 0; }
 .bubble.user .message-content { white-space: pre-wrap; }
 .bubble-label { display: block; margin-bottom: 5px; opacity: .55; font: 9.5px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.message-actions { display: flex; flex: 0 0 auto; gap: 2px; padding-bottom: 1px; }
+.row.user .message-actions { order: -1; }
+.message-action { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+.message-action:hover { color: var(--accent); background: var(--panel); border-color: var(--panel-line); }
+.message-action:disabled { opacity: .35; cursor: not-allowed; }
+.message-action svg { width: 15px; height: 15px; }
 .message-files { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px; }
 .message-files span { padding: 4px 6px; color: var(--accent); background: rgba(217, 142, 62, .13); border-radius: 3px; font: 9.5px/1.2 var(--mono); }
 .tool-trace { margin-top: 9px; border-top: 1px dashed var(--assistant-line); padding-top: 7px; color: var(--muted); font: 9.5px/1.45 var(--mono); }
@@ -332,6 +342,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .model-option-action:hover { color: var(--accent); background: var(--ink); }
 .model-option-action.danger:hover { color: #d86b6b; }
 .model-option-action svg { width: 13px; height: 13px; }
+.model-form-error { margin: 0; padding: 8px 10px; color: #8f241d; background: #fce9e6; border: 1px solid #e7b6af; border-radius: 4px; font: 10.5px/1.45 var(--mono); }
 .add-model-button { border-bottom: 0; color: var(--accent); font: 10.5px/1.3 var(--mono); }
 .add-model-button svg { width: 14px; height: 14px; }
 .picker-menu-header { padding: 9px 12px 6px; color: var(--muted); font: 9.5px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
@@ -446,6 +457,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .about-copy p { margin: 15px 0 0; }
 .about-copy code { padding: .12em .32em; color: var(--accent); background: rgba(217, 142, 62, .1); border: 1px solid rgba(217, 142, 62, .18); border-radius: 3px; font: .88em/1.4 var(--mono); }
 .about-copy a { color: var(--accent); text-underline-offset: 2px; }
+.about-footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 20px; padding-top: 12px; color: var(--muted); border-top: 1px solid var(--panel-line); font: 9.5px/1.4 var(--mono); }
 .parameter-list { display: flex; flex-direction: column; border: 1px solid var(--panel-line); border-radius: 4px; }
 .parameter { display: grid; grid-template-columns: minmax(110px, 32%) 1fr; gap: 12px; padding: 10px; border-top: 1px solid var(--panel-line); }
 .parameter:first-child { border-top: 0; }

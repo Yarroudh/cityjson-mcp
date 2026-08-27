@@ -52,6 +52,7 @@ const elements = {
   modelDialogTitle: document.querySelector('#model-dialog-title'),
   modelDialogIntro: document.querySelector('#model-dialog-intro'),
   modelSubmitLabel: document.querySelector('#model-submit-label'),
+  modelFormError: document.querySelector('#model-form-error'),
   modelProvider: document.querySelector('#model-provider'),
   modelName: document.querySelector('#model-name'),
   modelApiKey: document.querySelector('#model-api-key'),
@@ -78,6 +79,12 @@ let dragDepth = 0;
 let clientId;
 let pendingSuggestion = null;
 let editingModelId = null;
+
+const MESSAGE_ICONS = {
+  copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg>',
+  retry: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6"/><path d="M5.5 9a8 8 0 1 1-.6 5"/></svg>',
+  copied: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>'
+};
 
 try {
   clientId = localStorage.getItem(CLIENT_KEY);
@@ -302,7 +309,99 @@ function renderMarkdown(source) {
   return container;
 }
 
-function renderMessage(message) {
+function messageActionButton(title, icon, handler) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'message-action';
+  button.title = title;
+  button.setAttribute('aria-label', title);
+  button.innerHTML = icon;
+  button.addEventListener('click', handler);
+  return button;
+}
+
+async function copyMessage(message, button) {
+  try {
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(String(message.content || ''));
+        copied = true;
+      } catch {}
+    }
+    if (!copied) {
+      const field = document.createElement('textarea');
+      field.value = String(message.content || '');
+      field.style.position = 'fixed';
+      field.style.opacity = '0';
+      document.body.append(field);
+      try {
+        field.select();
+        if (!document.execCommand('copy')) throw new Error('Clipboard access is unavailable');
+      } finally {
+        field.remove();
+      }
+    }
+    button.innerHTML = MESSAGE_ICONS.copied;
+    button.title = 'Copied';
+    button.setAttribute('aria-label', 'Copied');
+    setTimeout(() => {
+      if (!button.isConnected) return;
+      button.innerHTML = MESSAGE_ICONS.copy;
+      button.title = 'Copy message';
+      button.setAttribute('aria-label', 'Copy message');
+    }, 1500);
+  } catch (error) {
+    showError(`Copy failed: ${error.message}`);
+  }
+}
+
+async function retryMessage(conversation, message, messageIndex) {
+  if (sendingId || importing || runtimeConfig?.modelConfigured === false) return;
+  const laterMessages = conversation.messages.slice(messageIndex + 1);
+  const hadResponse = laterMessages[0]?.role === 'assistant';
+  const retryTurn = conversation.messages
+    .slice(0, messageIndex)
+    .filter(item => item.role === 'user').length;
+  const previousSuggestionState = conversation.suggestionState;
+  const previousSuggestionPage = conversation.suggestionPage;
+  conversation.messages = conversation.messages.slice(0, messageIndex + 1);
+  conversation.suggestionState = inferSuggestionState(message.content);
+  conversation.suggestionPage = 0;
+  pendingSuggestion = null;
+  sendingId = conversation.id;
+  hideError();
+  saveState();
+  render();
+
+  try {
+    const result = await requestJson('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: conversation.sessionId,
+        clientId,
+        message: message.content,
+        batchId: message.file ? conversation.batchId : undefined,
+        retryTurn: hadResponse ? retryTurn : undefined
+      })
+    });
+    if (message.file) conversation.batchPending = false;
+    conversation.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
+  } catch (error) {
+    conversation.messages.push(...laterMessages);
+    conversation.suggestionState = previousSuggestionState;
+    conversation.suggestionPage = previousSuggestionPage;
+    showError(`Retry failed: ${error.message}`);
+  } finally {
+    sendingId = null;
+    saveState();
+    render();
+    elements.message.focus();
+  }
+}
+
+function renderMessage(message, messageIndex, conversation) {
   const row = document.createElement('div');
   row.className = `row ${message.role}`;
   const bubble = document.createElement('div');
@@ -354,7 +453,15 @@ function renderMessage(message) {
     }
     bubble.append(downloads);
   }
-  row.append(bubble);
+  const actions = document.createElement('div');
+  actions.className = 'message-actions';
+  if (message.role === 'user') {
+    const retry = messageActionButton('Retry question', MESSAGE_ICONS.retry, () => retryMessage(conversation, message, messageIndex));
+    retry.disabled = Boolean(sendingId) || importing || runtimeConfig?.modelConfigured === false;
+    actions.append(retry);
+  }
+  actions.append(messageActionButton('Copy message', MESSAGE_ICONS.copy, event => copyMessage(message, event.currentTarget)));
+  row.append(bubble, actions);
   return row;
 }
 
@@ -408,7 +515,7 @@ function renderActiveConversation() {
   elements.conversationNumber.textContent = `#${String(active.number).padStart(3, '0')}`;
   elements.conversationTitle.textContent = active.name;
   elements.modelMetadata.textContent = `v${active.summary.version || 'unknown version'}`;
-  elements.thread.replaceChildren(...active.messages.map(renderMessage));
+  elements.thread.replaceChildren(...active.messages.map((message, index) => renderMessage(message, index, active)));
 
   if (sendingId === active.id) {
     const row = document.createElement('div');
@@ -504,9 +611,11 @@ function openModelDialog(model = null) {
   editingModelId = model?.id || null;
   elements.modelDialogTitle.textContent = model ? 'Edit model' : 'Add a model';
   elements.modelDialogIntro.textContent = model
-    ? 'Update this model configuration. Leave the API key blank to keep the existing key.'
-    : 'Add an Anthropic Messages or OpenAI-compatible model. Credentials stay in the running application and are never displayed after saving.';
+    ? 'Update this model configuration. Leave the API key blank to keep the existing key. Saving runs a brief tool-call test.'
+    : 'Add an Anthropic Messages or OpenAI-compatible model. A brief tool-call test must pass before it is saved. Credentials stay in the running application and are never displayed after saving.';
   elements.modelSubmitLabel.textContent = model ? 'Save changes' : 'Use this model';
+  elements.modelFormError.hidden = true;
+  elements.modelFormError.textContent = '';
   elements.modelProvider.value = model?.provider || 'openai';
   elements.modelName.value = model?.model || '';
   elements.modelApiKey.value = '';
@@ -839,7 +948,10 @@ elements.modelProvider.addEventListener('change', () => {
 elements.modelForm.addEventListener('submit', async event => {
   event.preventDefault();
   const submit = elements.modelForm.querySelector('[type="submit"]');
+  const wasEditing = Boolean(editingModelId);
   submit.disabled = true;
+  elements.modelSubmitLabel.textContent = wasEditing ? 'Testing changes…' : 'Testing model…';
+  elements.modelFormError.hidden = true;
   hideError();
   try {
     const endpoint = editingModelId ? `/api/models/${encodeURIComponent(editingModelId)}` : '/api/models';
@@ -859,10 +971,11 @@ elements.modelForm.addEventListener('submit', async event => {
     elements.modelDialog.close();
     render();
   } catch (error) {
-    showError(`Model configuration failed: ${error.message}`);
+    elements.modelFormError.textContent = `Model configuration rejected: ${error.message}`;
+    elements.modelFormError.hidden = false;
   } finally {
     submit.disabled = false;
-    elements.modelApiKey.value = '';
+    elements.modelSubmitLabel.textContent = wasEditing ? 'Save changes' : 'Use this model';
   }
 });
 

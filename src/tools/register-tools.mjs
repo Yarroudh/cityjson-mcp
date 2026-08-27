@@ -72,15 +72,6 @@ export function registerTools(server, deps) {
     })
   }, safe(async ({ content, filename }) => jsonResult(await dm.importContent(content, filename))));
 
-  server.registerTool('cityjson_upload', {
-    title: 'Import small CityJSON text (legacy)',
-    description: 'Deprecated compatibility alias for cityjson_import_text. This is not a binary file upload and must not be used for normal attachments or large models.',
-    inputSchema: z.object({
-      content: z.string().min(2).describe('Complete UTF-8 CityJSON document as JSON text.'),
-      filename: z.string().min(1).max(200).default('upload.city.json').describe('Display filename used for the managed workspace copy.')
-    })
-  }, safe(async ({ content, filename }) => jsonResult(await dm.importContent(content, filename))));
-
   server.registerTool('cityjson_download', {
     title: 'Download CityJSON content',
     description: 'Prepare an opened or transformed dataset for download. The web host streams the managed file directly; standalone MCP clients receive an embedded application/json resource within the configured inline-size limit.',

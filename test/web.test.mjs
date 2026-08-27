@@ -89,11 +89,24 @@ test('model behavior is low-temperature and suppresses emoji output', () => {
   assert.equal(cleanModelText('Inspection complete. 🏙️'), 'Inspection complete.');
 });
 
+test('model connection validation rejects a response without the required tool call', async () => {
+  const client = createModelClient({
+    provider: 'openai', apiKey: 'test', model: 'text-only-model', baseUrl: 'https://example.test/v1',
+    maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async () => jsonResponse({ choices: [{ message: { role: 'assistant', content: 'Connection works.' } }] }));
+  await assert.rejects(client.testConnection(), /did not complete the required tool-call test/);
+});
+
 test('HTML versions application assets to prevent cached UI mismatches', async () => {
-  const html = await fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8');
-  assert.match(html, /styles\.css\?v=7/);
-  assert.match(html, /app\.js\?v=7/);
+  const [html, app] = await Promise.all([
+    fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8'),
+    fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
+  ]);
+  assert.match(html, /styles\.css\?v=10/);
+  assert.match(html, /app\.js\?v=9/);
   assert.match(html, /favicon\.svg\?v=1/);
+  assert.match(app, /messageActionButton\('Retry question', MESSAGE_ICONS\.retry/);
+  assert.match(app, /messageActionButton\('Copy message', MESSAGE_ICONS\.copy/);
 });
 
 test('question suggestions remain available through large follow-up trees', () => {
@@ -117,6 +130,8 @@ test('primary controls and muted text meet readable contrast in both themes', as
     assert.ok(block, `${theme} theme variables are present`);
     assert.ok(contrastRatio(cssVariable(block, 'button-bg'), cssVariable(block, 'button-text')) >= 7);
     assert.ok(contrastRatio(cssVariable(block, 'panel'), cssVariable(block, 'muted')) >= 4.5);
+    assert.ok(contrastRatio(cssVariable(block, 'user-bubble'), cssVariable(block, 'user-text')) >= 7);
+    if (theme === 'light') assert.equal(cssVariable(block, 'user-bubble'), '#ffffff');
   }
 });
 
@@ -190,6 +205,60 @@ test('chat turns prepare a derived dataset when the user asks for a download', a
   assert.equal(resources[0].filename, 'subset.city.json');
 });
 
+test('retrying a question restores its server-side history checkpoint and discards later turns', async t => {
+  const input = await fs.mkdtemp(path.join(os.tmpdir(), 'datum-retry-test-'));
+  const histories = [];
+  const model = {
+    async runTurn(history, message) {
+      histories.push({ length: history.length, message });
+      return {
+        text: `Reply to ${message}`,
+        history: [...history, { role: 'user', content: message }, { role: 'assistant', content: `Reply to ${message}` }],
+        trace: []
+      };
+    }
+  };
+  const gateway = {
+    tools: [],
+    async connect() {},
+    async call(name) {
+      if (name !== 'cityjson_backend_status') throw new Error(`Unexpected tool ${name}`);
+      return {
+        isError: false,
+        structuredContent: {
+          backends: Object.fromEntries(['cjio', 'cjval', 'val3dity', 'citygmlTools', 'cjdb'].map(key => [key, { available: true }]))
+        }
+      };
+    },
+    async close() {},
+    modelTools() { return []; }
+  };
+  const config = getWebConfig({
+    MODEL_PROVIDER: 'openai',
+    MODEL_NAME: 'checkpoint-model',
+    MODEL_API_KEY: 'test-secret',
+    CITYJSON_MCP_INPUT: input
+  });
+  const app = await createChatApplication(config, { gateway, model });
+  t.after(async () => {
+    await app.close();
+    await fs.rm(input, { recursive: true, force: true });
+  });
+  const body = { sessionId: 'retry-session-123', clientId: 'retry-client-123' };
+
+  assert.equal((await applicationRequest(app.server, 'POST', '/api/chat', { ...body, message: 'First question' })).status, 200);
+  assert.equal((await applicationRequest(app.server, 'POST', '/api/chat', { ...body, message: 'Second question' })).status, 200);
+  assert.equal((await applicationRequest(app.server, 'POST', '/api/chat', { ...body, message: 'First question', retryTurn: 0 })).status, 200);
+  assert.equal((await applicationRequest(app.server, 'POST', '/api/chat', { ...body, message: 'New follow-up' })).status, 200);
+
+  assert.deepEqual(histories, [
+    { length: 0, message: 'First question' },
+    { length: 2, message: 'Second question' },
+    { length: 0, message: 'First question' },
+    { length: 2, message: 'New follow-up' }
+  ]);
+});
+
 test('chat API adds, edits, selects, and deletes model profiles and downloads imported datasets', async t => {
   const input = await fs.mkdtemp(path.join(os.tmpdir(), 'datum-api-test-'));
   const sample = await fs.readFile(samplePath);
@@ -223,7 +292,21 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
     MODEL_API_KEY: 'default-secret',
     CITYJSON_MCP_INPUT: input
   });
-  const app = await createChatApplication(config, { gateway, model: {} });
+  const modelTestRequests = [];
+  const fetchImpl = async (url, options) => {
+    const body = JSON.parse(options.body);
+    modelTestRequests.push({ url, body });
+    if (body.model === 'invalid-model') return jsonResponse({ error: { message: 'Invalid API key or model' } }, 401);
+    if (url.endsWith('/v1/messages')) {
+      return jsonResponse({ content: [{ type: 'tool_use', id: 'test-1', name: 'datum_connection_test', input: { status: 'ok' } }] });
+    }
+    return jsonResponse({
+      choices: [{ message: { role: 'assistant', content: null, tool_calls: [{
+        id: 'test-2', type: 'function', function: { name: 'datum_connection_test', arguments: '{"status":"ok"}' }
+      }] } }]
+    });
+  };
+  const app = await createChatApplication(config, { gateway, model: {}, fetchImpl });
   t.after(async () => {
     await app.close();
     await fs.rm(input, { recursive: true, force: true });
@@ -234,6 +317,18 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   const initial = JSON.parse(initialResult.body);
   assert.equal(initial.activeModelId, 'default');
   assert.equal(initial.models.length, 1);
+
+  const rejectedResponse = await applicationRequest(app.server, 'POST', '/api/models', {
+    clientId,
+    provider: 'openai',
+    model: 'invalid-model',
+    apiKey: 'invalid-secret',
+    baseUrl: 'https://example.test/v1'
+  });
+  assert.equal(rejectedResponse.status, 400);
+  assert.match(JSON.parse(rejectedResponse.body).error, /Invalid API key or model/);
+  const afterRejection = JSON.parse((await applicationRequest(app.server, 'GET', `/api/config?clientId=${clientId}`)).body);
+  assert.equal(afterRejection.models.length, 1);
 
   const addedResponse = await applicationRequest(app.server, 'POST', '/api/models', {
     clientId,
@@ -247,6 +342,7 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   assert.equal(added.models.length, 2);
   assert.equal(added.model, 'claude-test');
   assert.equal('apiKey' in added, false);
+  assert.equal(modelTestRequests.at(-1).body.tool_choice.name, 'datum_connection_test');
   const customModel = added.models.find(model => !model.isDefault);
   assert.ok(customModel);
 
@@ -262,6 +358,7 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   assert.equal(edited.model, 'edited-model');
   assert.equal(edited.models.find(model => model.id === customModel.id).baseUrl, 'https://example.test/v1');
   assert.equal('apiKey' in edited.models.find(model => model.id === customModel.id), false);
+  assert.equal(modelTestRequests.at(-1).body.tool_choice, 'auto');
 
   const selectedResult = await applicationRequest(app.server, 'POST', '/api/models/select', { clientId, modelId: 'default' });
   const selected = JSON.parse(selectedResult.body);

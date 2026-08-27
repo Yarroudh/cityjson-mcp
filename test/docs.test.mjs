@@ -41,7 +41,7 @@ test('README lists every registered MCP tool', async () => {
     fs.readFile(path.join(root, 'src', 'tools', 'register-tools.mjs'), 'utf8')
   ]);
   const names = [...registration.matchAll(/server\.registerTool\('([^']+)'/g)].map(match => match[1]);
-  assert.equal(names.length, 38);
+  assert.equal(names.length, 37);
   for (const name of names) assert.match(readme, new RegExp(`\\b${name}\\b`), `${name} must be documented`);
 });
 
@@ -59,4 +59,7 @@ test('chat startup checks the local image before pulling and never builds automa
   assert.match(startup, /'up', '-d'/);
   assert.match(startup, /'--no-build'/);
   assert.doesNotMatch(compose, /^\s+build:/m);
+  for (const source of ['../src:/app/src:ro', '../web:/app/web:ro', '../resources:/app/resources:ro']) {
+    assert.match(compose, new RegExp(source.replaceAll('/', '\\/')));
+  }
 });

@@ -13,6 +13,9 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
+      - ../src:/app/src:ro
+      - ../web:/app/web:ro
+      - ../resources:/app/resources:ro
       - cityjson-input:/input
       - cityjson-data:/data
 

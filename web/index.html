@@ -6,7 +6,7 @@
   <meta name="description" content="Datum is a web application for exploring CityJSON datasets through a conversational interface. Import a CityJSON file to ask questions about its contents, or run any connected CityJSON tool.">
   <title>Datum</title>
   <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=7">
+  <link rel="stylesheet" href="/styles.css?v=10">
 </head>
 <body>
   <div class="app" id="app" data-theme="dark">
@@ -147,6 +147,7 @@
         <label class="field"><span>Model name</span><input id="model-name" type="text" maxlength="200" autocomplete="off" required placeholder="e.g. gemini-3.7-flash"></label>
         <label class="field"><span>API key</span><input id="model-api-key" type="password" maxlength="10000" autocomplete="new-password" required placeholder="Enter the API key"></label>
         <label class="field"><span>Base URL</span><input id="model-base-url" type="url" maxlength="2048" autocomplete="off" required placeholder="https://api.example.com"></label>
+        <p class="model-form-error" id="model-form-error" role="alert" hidden></p>
         <footer class="modal-actions"><button class="stub-button" id="model-cancel" type="button">Cancel</button><button class="stub-button primary" type="submit"><span id="model-submit-label">Use this model</span></button></footer>
       </form>
     </dialog>
@@ -169,13 +170,17 @@
           <button class="modal-close" id="about-dialog-close" type="button" aria-label="Close">×</button>
         </header>
         <div class="about-copy">
-          <p>Datum is a focused chat interface for inspecting, validating, transforming, and downloading CityJSON datasets.</p>
-          <p>Attachments are imported directly into the application’s CityJSON MCP workspace. The selected language model can then use the connected <code>cityjson_*</code> actions on immutable dataset handles, without asking you for local file paths.</p>
-          <p>CityJSON MCP is developed by <a href="https://github.com/Yarroudh" target="_blank" rel="noopener noreferrer">Yarroudh</a>. Source code, documentation, and issue tracking are available on <a href="https://github.com/Yarroudh/cityjson-mcp" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
+          <p>Datum is the browser client included with CityJSON MCP. It connects an LLM model to 37 MCP actions.</p>
+          <p>The actions cover metadata and object inspection, attribute and spatial queries, schema validation, geometry validation with, subsetting, reprojection, cleanup, triangulation, merging, from and to CityGML conversion, OBJ/STL/GLB/B3DM export, and cjdb/PostGIS import and export.</p>
+          <p>CityJSON MCP is an open source project developed by <a href="https://github.com/Yarroudh" target="_blank" rel="noopener noreferrer">Yarroudh</a>. The source code, setup documentation, issue tracker, and contribution instructions are available in the <a href="https://github.com/Yarroudh/cityjson-mcp" target="_blank" rel="noopener noreferrer">GitHub repository</a>.</p>
+          <footer class="about-footer">
+            <span>The application is under MIT License.</span>
+            <span>© 2026</span>
+          </footer>
         </div>
       </article>
     </dialog>
   </div>
-  <script type="module" src="/app.js?v=7"></script>
+  <script type="module" src="/app.js?v=9"></script>
 </body>
 </html>

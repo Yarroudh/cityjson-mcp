@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/Node.js-20%2B-339933.svg" alt="Node.js 20 or newer">
   <img src="https://img.shields.io/badge/CityJSON-2.0.2-e0a05b.svg" alt="CityJSON 2.0.2">
-  <img src="https://img.shields.io/badge/MCP_tools-38-5c6ac4.svg" alt="38 MCP tools">
+  <img src="https://img.shields.io/badge/MCP_tools-37-5c6ac4.svg" alt="37 MCP tools">
   <a href="https://hub.docker.com/r/yarroudh/cityjson-mcp"><img src="https://img.shields.io/badge/Docker-yarroudh%2Fcityjson--mcp-2496ed.svg" alt="Docker image"></a>
 </p>
 
@@ -204,7 +204,7 @@ Place `model.city.json` in the mounted folder, then ask the client:
 
 > Import `model.city.json` and summarize it.
 
-The model should call `cityjson_import` with the filename. It should not send the full file through `cityjson_import_text` or `cityjson_upload`.
+The model should call `cityjson_import` with the filename. It should not send the full file through `cityjson_import_text`.
 
 Paths created by a chat client, such as `/mnt/user-data/...`, do not automatically exist in the MCP container. Use the mounted inbox or a client that implements attachment handling, such as Datum.
 
@@ -261,14 +261,13 @@ Add the `/input` mount shown above when the server must read local files.
 - `cityjson_import` copies a source file into the managed workspace and returns a `dataset_id`.
 - `cityjson_open` opens an authorized server-visible path.
 - `cityjson_import_text` accepts small CityJSON documents supplied as text.
-- `cityjson_upload` is a deprecated alias for `cityjson_import_text`; it is not a file attachment API.
 - `cityjson_download` returns a source or derived dataset.
 - Dataset handles remain valid only while the MCP server process is running.
 - Derived files remain in the managed workspace until they are deleted externally.
 
 ## Tool catalog
 
-The server exposes 38 tools.
+The server exposes 37 tools.
 
 ### Dataset management and inspection
 
@@ -278,7 +277,6 @@ The server exposes 38 tools.
 | `cityjson_list_imports` | native | List JSON files in the input directory. |
 | `cityjson_import` | native | Import an input file and return a `dataset_id`. |
 | `cityjson_import_text` | native | Import a small CityJSON document supplied as text. |
-| `cityjson_upload` | native | Deprecated alias for `cityjson_import_text`. |
 | `cityjson_open` | native | Open a CityJSON file from an authorized path. |
 | `cityjson_download` | native | Return a source or derived CityJSON file. |
 | `cityjson_save` | native | Copy a dataset to an authorized destination. |
