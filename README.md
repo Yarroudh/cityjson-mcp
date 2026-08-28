@@ -499,6 +499,10 @@ If you use this project in your research, please cite it as follows.
 
 > Yarroudh. (2026). Yarroudh/cityjson-mcp: CityJSON MCP & Datum Chat Application (Version 0.2.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.22151334
 
+### IEEE
+
+> [1] Yarroudh, Yarroudh/cityjson-mcp: CityJSON MCP & Datum Chat Application (Version 0.2.0). (Aug. 28, 2026). Zenodo. doi: 10.5281/zenodo.22151334.
+
 ### BibTeX
 
 ```bibtex
