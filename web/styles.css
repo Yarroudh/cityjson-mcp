@@ -381,6 +381,15 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .tool-trace { margin-top: 9px; border-top: 1px dashed var(--assistant-line); padding-top: 7px; color: var(--muted); font: 9.5px/1.45 var(--mono); }
 .tool-trace summary { cursor: pointer; }
 .tool-trace ul { margin: 6px 0 0; padding-left: 17px; }
+.message-state { margin-top: 9px; padding-top: 7px; border-top: 1px dashed var(--assistant-line); color: var(--muted); font: 9.5px/1.4 var(--mono); }
+.message-state.cancelled { color: var(--accent); }
+.live-progress { display: grid; gap: 6px; margin-top: 8px; color: var(--muted); font: 9.5px/1.4 var(--mono); }
+.live-status { display: flex; align-items: center; gap: 7px; }
+.live-tool { position: relative; display: flex; justify-content: space-between; gap: 14px; overflow: hidden; padding: 6px 8px; background: var(--ink); border: 1px solid var(--assistant-line); border-radius: 3px; }
+.live-tool > span:not(.live-tool-meter) { position: relative; z-index: 1; }
+.live-tool.complete { opacity: .72; }
+.live-tool.error { color: #d56b5f; }
+.live-tool-meter { position: absolute; inset: auto 0 0; height: 2px; background: linear-gradient(to right, var(--accent) var(--progress), transparent var(--progress)); transition: background .2s; }
 .typing-dots { display: inline-flex; gap: 4px; padding: 2px 0; }
 .typing-dots span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .4; animation: bounce 1.2s infinite ease-in-out; }
 
@@ -519,6 +528,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .send-btn svg { width: 16px; height: 16px; }
 .send-btn:not(:disabled):hover { color: var(--button-text); background: var(--button-bg-hover); }
 .send-btn:disabled { color: var(--muted); background: var(--panel-line); cursor: default; }
+.send-btn.cancel { color: var(--button-text); background: #a74431; }
+.send-btn.cancel:hover { background: #873322; }
 
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--accent);

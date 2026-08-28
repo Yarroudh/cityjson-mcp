@@ -35,6 +35,114 @@ async function fetchJson(fetchImpl, url, options) {
   return body;
 }
 
+async function fetchEventStream(fetchImpl, url, options, onData) {
+  const response = await fetchImpl(url, options);
+  if (!response.ok) {
+    const text = await response.text();
+    let body;
+    try { body = text ? JSON.parse(text) : {}; }
+    catch { body = { raw: text }; }
+    const message = body?.error?.message || body?.message || text || response.statusText;
+    throw new Error(`Model API returned ${response.status}: ${message}`);
+  }
+  if (!response.body) throw new Error('Model API returned a streaming response without a body');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const consume = block => {
+    const data = block.split(/\r?\n/)
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).trimStart())
+      .join('\n');
+    if (!data || data === '[DONE]') return data === '[DONE]';
+    const event = JSON.parse(data);
+    if (event?.error) throw new Error(`Model API stream failed: ${event.error.message || event.error.type || 'Unknown error'}`);
+    onData(event);
+    return false;
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const blocks = buffer.split(/\r?\n\r?\n/);
+      buffer = blocks.pop() || '';
+      for (const block of blocks) if (consume(block)) return;
+      if (done) {
+        if (buffer.trim()) consume(buffer);
+        return;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function fetchOpenAIStream(fetchImpl, url, options, onEvent) {
+  const message = { role: 'assistant', content: '' };
+  const toolCalls = new Map();
+  let finishReason = null;
+  await fetchEventStream(fetchImpl, url, options, event => {
+    const choice = event.choices?.[0];
+    if (!choice) return;
+    finishReason = choice.finish_reason ?? finishReason;
+    const delta = choice.delta || {};
+    if (typeof delta.content === 'string') {
+      message.content += delta.content;
+      onEvent({ type: 'text_delta', text: delta.content });
+    }
+    if (typeof delta.reasoning_content === 'string') {
+      message.reasoning_content = `${message.reasoning_content || ''}${delta.reasoning_content}`;
+    }
+    for (const fragment of delta.tool_calls || []) {
+      const index = Number.isSafeInteger(fragment.index) ? fragment.index : toolCalls.size;
+      const call = toolCalls.get(index) || { id: '', type: 'function', function: { name: '', arguments: '' } };
+      if (fragment.id) call.id += fragment.id;
+      if (fragment.type) call.type = fragment.type;
+      if (fragment.function?.name) call.function.name += fragment.function.name;
+      if (fragment.function?.arguments) call.function.arguments += fragment.function.arguments;
+      toolCalls.set(index, call);
+    }
+  });
+  if (toolCalls.size) message.tool_calls = [...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
+  if (!message.content) message.content = null;
+  return { choices: [{ message, finish_reason: finishReason }] };
+}
+
+async function fetchAnthropicStream(fetchImpl, url, options, onEvent) {
+  const content = [];
+  let stopReason = null;
+  await fetchEventStream(fetchImpl, url, options, event => {
+    if (event.type === 'content_block_start') {
+      const block = event.content_block || {};
+      content[event.index] = block.type === 'tool_use'
+        ? { type: 'tool_use', id: block.id, name: block.name, input: block.input || {}, _input: '' }
+        : { type: 'text', text: block.text || '' };
+      if (block.type === 'text' && block.text) onEvent({ type: 'text_delta', text: block.text });
+      return;
+    }
+    if (event.type === 'content_block_delta') {
+      const block = content[event.index];
+      if (!block) return;
+      if (event.delta?.type === 'text_delta') {
+        block.text += event.delta.text || '';
+        if (event.delta.text) onEvent({ type: 'text_delta', text: event.delta.text });
+      } else if (event.delta?.type === 'input_json_delta') {
+        block._input += event.delta.partial_json || '';
+      }
+      return;
+    }
+    if (event.type === 'message_delta') stopReason = event.delta?.stop_reason ?? stopReason;
+  });
+  for (const block of content) {
+    if (block?.type !== 'tool_use') continue;
+    if (block._input) block.input = parseArguments(block._input);
+    delete block._input;
+  }
+  return { content: content.filter(Boolean), stop_reason: stopReason };
+}
+
 function parseArguments(value) {
   try { return JSON.parse(value || '{}'); }
   catch (error) { throw new Error(`Model returned invalid tool arguments: ${error.message}`); }
@@ -47,15 +155,25 @@ function cleanModelText(value) {
     .trim();
 }
 
-async function invokeTools(calls, callTool) {
+async function invokeTools(calls, callTool, { signal, onEvent } = {}) {
   const results = [];
   for (const call of calls) {
+    signal?.throwIfAborted();
     const startedAt = Date.now();
+    onEvent?.({ type: 'tool_start', id: call.id, name: call.name });
     try {
-      const result = await callTool(call.name, call.arguments);
-      results.push({ ...call, ...result, durationMs: Date.now() - startedAt });
+      const result = await callTool(call.name, call.arguments, {
+        signal,
+        onProgress: progress => onEvent?.({ type: 'tool_progress', id: call.id, name: call.name, ...progress })
+      });
+      const completed = { ...call, ...result, durationMs: Date.now() - startedAt };
+      results.push(completed);
+      onEvent?.({ type: 'tool_end', id: call.id, name: call.name, durationMs: completed.durationMs, isError: completed.isError === true });
     } catch (error) {
-      results.push({ ...call, isError: true, modelContent: JSON.stringify({ error: error.message }), durationMs: Date.now() - startedAt });
+      if (signal?.aborted || error?.name === 'AbortError') throw error;
+      const completed = { ...call, isError: true, modelContent: JSON.stringify({ error: error.message }), durationMs: Date.now() - startedAt };
+      results.push(completed);
+      onEvent?.({ type: 'tool_end', id: call.id, name: call.name, durationMs: completed.durationMs, isError: true });
     }
   }
   return results;
@@ -93,7 +211,7 @@ class AnthropicModelClient {
     if (!accepted) throw new Error('The model responded, but it did not complete the required tool-call test');
   }
 
-  async runTurn(history, message, tools, callTool) {
+  async runTurn(history, message, tools, callTool, { signal, onEvent } = {}) {
     const messages = [...history, { role: 'user', content: message }];
     const trace = [];
     const textParts = [];
@@ -102,8 +220,10 @@ class AnthropicModelClient {
     let toolRounds = 0;
 
     for (let round = 0; round < this.config.maxToolRounds + MAX_TEXT_CONTINUATIONS; round += 1) {
-      const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/v1/messages'), {
+      signal?.throwIfAborted();
+      const request = {
         method: 'POST',
+        signal,
         headers: {
           'content-type': 'application/json',
           'x-api-key': this.config.apiKey,
@@ -115,9 +235,13 @@ class AnthropicModelClient {
           temperature: this.config.temperature ?? 0.1,
           system: SYSTEM_PROMPT,
           messages,
-          ...(requireTextResponse ? {} : { tools })
+          ...(requireTextResponse ? {} : { tools }),
+          ...(onEvent ? { stream: true } : {})
         })
-      });
+      };
+      const response = onEvent
+        ? await fetchAnthropicStream(this.fetch, apiUrl(this.config.baseUrl, '/v1/messages'), request, onEvent)
+        : await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/v1/messages'), request);
       const content = Array.isArray(response.content) ? response.content : [];
       messages.push({ role: 'assistant', content });
       const calls = content.filter(item => item.type === 'tool_use').map(item => ({
@@ -142,7 +266,7 @@ class AnthropicModelClient {
       if (toolRounds >= this.config.maxToolRounds) throw new Error(`Model exceeded the ${this.config.maxToolRounds}-round tool-call limit`);
       toolRounds += 1;
 
-      const results = await invokeTools(calls, callTool);
+      const results = await invokeTools(calls, callTool, { signal, onEvent });
       trace.push(...results.map(result => ({ name: result.name, durationMs: result.durationMs, isError: result.isError === true })));
       messages.push({
         role: 'user',
@@ -194,7 +318,7 @@ class OpenAIModelClient {
     if (!accepted) throw new Error('The model responded, but it did not complete the required tool-call test');
   }
 
-  async runTurn(history, message, tools, callTool) {
+  async runTurn(history, message, tools, callTool, { signal, onEvent } = {}) {
     const messages = [...history, { role: 'user', content: message }];
     const trace = [];
     const textParts = [];
@@ -203,8 +327,10 @@ class OpenAIModelClient {
     let toolRounds = 0;
 
     for (let round = 0; round < this.config.maxToolRounds + MAX_TEXT_CONTINUATIONS; round += 1) {
-      const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), {
+      signal?.throwIfAborted();
+      const request = {
         method: 'POST',
+        signal,
         headers: {
           'content-type': 'application/json',
           authorization: `Bearer ${this.config.apiKey}`
@@ -216,9 +342,12 @@ class OpenAIModelClient {
           tool_choice: requireTextResponse ? 'none' : 'auto',
           max_tokens: this.config.maxOutputTokens,
           temperature: this.config.temperature ?? 0.1,
-          stream: false
+          stream: Boolean(onEvent)
         })
-      });
+      };
+      const response = onEvent
+        ? await fetchOpenAIStream(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), request, onEvent)
+        : await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), request);
       const choice = response.choices?.[0];
       const modelMessage = choice?.message;
       if (!modelMessage) throw new Error('Model API response did not contain choices[0].message');
@@ -261,7 +390,7 @@ class OpenAIModelClient {
       if (toolRounds >= this.config.maxToolRounds) throw new Error(`Model exceeded the ${this.config.maxToolRounds}-round tool-call limit`);
       toolRounds += 1;
 
-      const results = await invokeTools(calls, callTool);
+      const results = await invokeTools(calls, callTool, { signal, onEvent });
       trace.push(...results.map(result => ({ name: result.name, durationMs: result.durationMs, isError: result.isError === true })));
       messages.push(...results.map(result => ({
         role: 'tool',

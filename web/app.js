@@ -87,6 +87,10 @@ const CACHE_TTL_MS = 8 * 60 * 60 * 1000;
 let conversations = [];
 let activeId = null;
 let sendingId = null;
+let liveTurn = null;
+let liveTurnTimer = null;
+let cancellingTurn = false;
+let liveRenderScheduled = false;
 let importing = false;
 let runtimeConfig = null;
 let sequence = 1;
@@ -188,7 +192,7 @@ function welcomeMessage(file) {
     .join(', ') || 'None reported';
   const attributeNames = summary.attributeNames || summary.attributes;
   const attributes = Array.isArray(attributeNames)
-    ? `${formatCount(attributeNames.length)} (${attributeNames.slice(0, 8).join(', ')}${attributeNames.length > 8 ? ', …' : ''})`
+    ? `${formatCount(attributeNames.length)} (${attributeNames.slice(0, 8).join(', ')}${attributeNames.length > 8 ? `, and ${formatCount(attributeNames.length - 8)} more` : ''})`
     : summary.attributeCount == null ? 'Not reported' : formatCount(summary.attributeCount);
   return `Imported ${inlineCode(file.originalFilename)} successfully.
 
@@ -220,6 +224,121 @@ async function requestJson(url, options) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Request failed with ${response.status}`);
   return body;
+}
+
+async function requestEventStream(url, options, onEvent) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `Request failed with ${response.status}`);
+  }
+  if (!response.body) throw new Error('The server returned no response stream');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      onEvent(event);
+      if (event.type === 'error') throw new Error(event.error || 'The streamed response failed');
+      if (event.type === 'complete' || event.type === 'cancelled') result = event;
+    }
+    if (done) break;
+  }
+  if (buffer.trim()) {
+    const event = JSON.parse(buffer);
+    onEvent(event);
+    if (event.type === 'error') throw new Error(event.error || 'The streamed response failed');
+    if (event.type === 'complete' || event.type === 'cancelled') result = event;
+  }
+  if (!result) throw new Error('The response stream ended before completion');
+  return result;
+}
+
+function liveTrace() {
+  return (liveTurn?.tools || []).filter(tool => tool.status !== 'running').map(tool => ({
+    name: tool.name,
+    durationMs: tool.durationMs ?? Date.now() - tool.startedAt,
+    isError: tool.isError === true
+  }));
+}
+
+function handleTurnEvent(event) {
+  if (!liveTurn) return;
+  if (event.type === 'status') liveTurn.status = event.message;
+  if (event.type === 'text_delta') {
+    liveTurn.text += event.text || '';
+    liveTurn.status = 'Writing response';
+  }
+  if (event.type === 'tool_start') {
+    liveTurn.status = `Running ${event.name}`;
+    liveTurn.tools.push({ id: event.id, name: event.name, status: 'running', startedAt: Date.now() });
+  }
+  if (event.type === 'tool_progress') {
+    const tool = [...liveTurn.tools].reverse().find(item => item.id === event.id || item.name === event.name);
+    if (tool) Object.assign(tool, {
+      progress: event.progress,
+      total: event.total,
+      message: event.message || tool.message
+    });
+  }
+  if (event.type === 'tool_end') {
+    const tool = [...liveTurn.tools].reverse().find(item => item.status === 'running' && (item.id === event.id || item.name === event.name));
+    if (tool) Object.assign(tool, { status: 'complete', durationMs: event.durationMs, isError: event.isError === true });
+    liveTurn.status = event.isError ? `${event.name} reported an error` : 'Processing tool results';
+  }
+  if (event.type === 'cancelled') liveTurn.status = event.message || 'Response cancelled.';
+  if (!liveRenderScheduled) {
+    liveRenderScheduled = true;
+    requestAnimationFrame(() => {
+      liveRenderScheduled = false;
+      render();
+    });
+  }
+}
+
+async function streamChatTurn(conversation, payload) {
+  liveTurn = {
+    conversationId: conversation.id,
+    text: '',
+    status: 'Preparing the conversation',
+    tools: [],
+    startedAt: Date.now()
+  };
+  clearInterval(liveTurnTimer);
+  liveTurnTimer = setInterval(() => {
+    if (sendingId === activeId && liveTurn?.tools.some(tool => tool.status === 'running')) renderActiveConversation();
+  }, 1000);
+  return requestEventStream('/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...payload, stream: true })
+  }, handleTurnEvent);
+}
+
+async function cancelTurn() {
+  const conversation = conversations.find(item => item.id === sendingId);
+  if (!conversation || cancellingTurn) return;
+  cancellingTurn = true;
+  if (liveTurn) liveTurn.status = 'Cancelling';
+  render();
+  try {
+    await requestJson('/api/chat/cancel', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: conversation.sessionId, clientId })
+    });
+  } catch (error) {
+    showError(`Cancellation failed: ${error.message}`);
+  } finally {
+    cancellingTurn = false;
+  }
 }
 
 async function showViewer() {
@@ -490,10 +609,7 @@ async function retryMessage(conversation, message, messageIndex) {
   render();
 
   try {
-    const result = await requestJson('/api/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const result = await streamChatTurn(conversation, {
         sessionId: conversation.sessionId,
         clientId,
         message: message.content,
@@ -503,19 +619,25 @@ async function retryMessage(conversation, message, messageIndex) {
         storedFilename: conversation.storedFilename,
         originalFilename: conversation.originalFilename,
         retryTurn: hadResponse ? retryTurn : undefined
-      })
     });
-    if (message.file) conversation.batchPending = false;
-    if (result.datasetId) conversation.summary.datasetId = result.datasetId;
-    if (typeof result.datasetIsDerived === 'boolean') conversation.datasetIsDerived = result.datasetIsDerived;
-    conversation.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
+    if (result.type === 'complete') {
+      if (message.file) conversation.batchPending = false;
+      if (result.datasetId) conversation.summary.datasetId = result.datasetId;
+      if (typeof result.datasetIsDerived === 'boolean') conversation.datasetIsDerived = result.datasetIsDerived;
+      conversation.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
+    } else {
+      conversation.messages.push({ role: 'assistant', content: liveTurn?.text || '', trace: liveTrace(), cancelled: true });
+    }
   } catch (error) {
     conversation.messages.push(...laterMessages);
     conversation.suggestionState = previousSuggestionState;
     conversation.suggestionPage = previousSuggestionPage;
     showError(`Retry failed: ${error.message}`);
   } finally {
+    clearInterval(liveTurnTimer);
+    liveTurnTimer = null;
     sendingId = null;
+    liveTurn = null;
     saveState();
     render();
     elements.message.focus();
@@ -559,6 +681,13 @@ function renderMessage(message, messageIndex, conversation) {
     }
     details.append(summary, list);
     bubble.append(details);
+  }
+
+  if (message.cancelled) {
+    const cancelled = document.createElement('div');
+    cancelled.className = 'message-state cancelled';
+    cancelled.textContent = 'Response cancelled';
+    bubble.append(cancelled);
   }
 
   if (message.downloads?.length) {
@@ -646,10 +775,37 @@ function renderActiveConversation() {
     const label = document.createElement('span');
     label.className = 'bubble-label';
     label.textContent = 'assistant';
+    bubble.append(label);
+    if (liveTurn?.text) bubble.append(renderMarkdown(liveTurn.text));
+    const progress = document.createElement('div');
+    progress.className = 'live-progress';
+    const status = document.createElement('div');
+    status.className = 'live-status';
     const dots = document.createElement('span');
     dots.className = 'typing-dots';
     dots.append(document.createElement('span'), document.createElement('span'), document.createElement('span'));
-    bubble.append(label, dots);
+    const statusText = document.createElement('span');
+    statusText.textContent = liveTurn?.status || 'Waiting for the model';
+    status.append(dots, statusText);
+    progress.append(status);
+    for (const tool of liveTurn?.tools || []) {
+      const item = document.createElement('div');
+      item.className = `live-tool ${tool.status}${tool.isError ? ' error' : ''}`;
+      const elapsed = tool.durationMs ?? Date.now() - tool.startedAt;
+      const name = document.createElement('span');
+      name.textContent = tool.message || tool.name;
+      const duration = document.createElement('span');
+      duration.textContent = tool.status === 'running' ? `${Math.max(0, Math.floor(elapsed / 1000))}s` : `${elapsed} ms`;
+      item.append(name, duration);
+      if (Number.isFinite(tool.progress) && Number.isFinite(tool.total) && tool.total > 0) {
+        const meter = document.createElement('span');
+        meter.className = 'live-tool-meter';
+        meter.style.setProperty('--progress', `${Math.min(100, Math.max(0, tool.progress / tool.total * 100))}%`);
+        item.append(meter);
+      }
+      progress.append(item);
+    }
+    bubble.append(progress);
     row.append(bubble);
     elements.thread.append(row);
   }
@@ -660,9 +816,15 @@ function renderActiveConversation() {
   if (!elements.promptSuggestions.hidden) renderSuggestions(active, modelUnavailable);
   elements.message.disabled = unavailable;
   elements.message.placeholder = modelUnavailable
-    ? 'Configure a model to start chatting…'
-    : unavailable ? 'Waiting on a reply…' : 'Ask about the model, or request a tool action…';
-  elements.sendButton.disabled = unavailable || !elements.message.value.trim();
+    ? 'Configure a model to start chatting'
+    : unavailable ? 'Waiting on a reply' : 'Ask about the model, or request a tool action';
+  elements.sendButton.disabled = importing || modelUnavailable || (!sendingId && !elements.message.value.trim());
+  elements.sendButton.classList.toggle('cancel', Boolean(sendingId));
+  elements.sendButton.setAttribute('aria-label', sendingId ? 'Cancel response' : 'Send message');
+  elements.sendButton.title = sendingId ? 'Cancel response' : 'Send message';
+  elements.sendButton.innerHTML = sendingId
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 16-8-6 16-2-6-8-2ZM12 14l8-10"/></svg>';
   requestAnimationFrame(() => { elements.thread.scrollTop = elements.thread.scrollHeight; });
 }
 
@@ -902,7 +1064,7 @@ function configureRuntime(config) {
 
 async function importOneFile(file) {
   if (!file.name.toLowerCase().endsWith('.json')) throw new Error(`${file.name} is not a JSON file`);
-  elements.importStatus.textContent = `Streaming ${file.name} into the MCP inbox…`;
+  elements.importStatus.textContent = `Streaming ${file.name} into the MCP inbox`;
   const form = new FormData();
   form.append('files', file, file.name);
   const batch = await requestJson('/api/uploads', { method: 'POST', body: form });
@@ -973,10 +1135,7 @@ async function sendMessage() {
   render();
 
   try {
-    const result = await requestJson('/api/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const result = await streamChatTurn(active, {
         sessionId: active.sessionId,
         clientId,
         message: text,
@@ -985,17 +1144,23 @@ async function sendMessage() {
         datasetIsDerived: active.datasetIsDerived === true,
         storedFilename: active.storedFilename,
         originalFilename: active.originalFilename
-      })
     });
-    active.batchPending = false;
-    if (result.datasetId) active.summary.datasetId = result.datasetId;
-    if (typeof result.datasetIsDerived === 'boolean') active.datasetIsDerived = result.datasetIsDerived;
-    active.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
+    if (result.type === 'complete') {
+      active.batchPending = false;
+      if (result.datasetId) active.summary.datasetId = result.datasetId;
+      if (typeof result.datasetIsDerived === 'boolean') active.datasetIsDerived = result.datasetIsDerived;
+      active.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
+    } else {
+      active.messages.push({ role: 'assistant', content: liveTurn?.text || '', trace: liveTrace(), cancelled: true });
+    }
     saveState();
   } catch (error) {
     showError(`Reply failed: ${error.message}`);
   } finally {
+    clearInterval(liveTurnTimer);
+    liveTurnTimer = null;
     sendingId = null;
+    liveTurn = null;
     saveState();
     render();
     elements.message.focus();
@@ -1031,17 +1196,17 @@ elements.viewerInspectorClose.addEventListener('click', () => viewer?.clearSelec
 
 elements.form.addEventListener('submit', event => {
   event.preventDefault();
-  sendMessage();
+  if (sendingId) cancelTurn(); else sendMessage();
 });
 elements.message.addEventListener('input', () => {
   elements.message.style.height = 'auto';
   elements.message.style.height = `${Math.min(elements.message.scrollHeight, 120)}px`;
-  elements.sendButton.disabled = Boolean(sendingId) || importing || !elements.message.value.trim();
+  elements.sendButton.disabled = importing || (!sendingId && !elements.message.value.trim());
 });
 elements.message.addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    sendMessage();
+    if (!sendingId) sendMessage();
   }
 });
 
@@ -1095,7 +1260,7 @@ elements.modelForm.addEventListener('submit', async event => {
   const submit = elements.modelForm.querySelector('[type="submit"]');
   const wasEditing = Boolean(editingModelId);
   submit.disabled = true;
-  elements.modelSubmitLabel.textContent = wasEditing ? 'Testing changes…' : 'Testing model…';
+  elements.modelSubmitLabel.textContent = wasEditing ? 'Testing changes' : 'Testing model';
   elements.modelFormError.hidden = true;
   hideError();
   try {

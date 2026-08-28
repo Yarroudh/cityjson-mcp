@@ -13,7 +13,7 @@ export class Val3dityAdapter {
     const reportPath = this.dm.makeDerivedPath(datasetId, 'val3dity-report.json');
     const args = [ds.path, '--report', reportPath];
     if (options.verbose) args.push('--verbose');
-    const result = await runCommand(this.bin, args, { allowNonZero: true });
+    const result = await runCommand(this.bin, args, { allowNonZero: true, signal: options.signal });
     let report = null;
     try { report = JSON.parse(await fs.readFile(reportPath, 'utf8')); } catch {}
     const reportValid = report && typeof report === 'object'

@@ -12,6 +12,7 @@ export async function runCommand(command, args = [], options = {}) {
   const timeoutMs = options.timeoutMs ?? Number(process.env.CITYJSON_MCP_COMMAND_TIMEOUT_MS || 120000);
   const maxOutput = options.maxOutput ?? 4 * 1024 * 1024;
   const started = Date.now();
+  options.signal?.throwIfAborted();
 
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -25,6 +26,12 @@ export async function runCommand(command, args = [], options = {}) {
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
     let killedForOutput = false;
+    let aborted = false;
+    const abort = () => {
+      aborted = true;
+      child.kill('SIGKILL');
+    };
+    options.signal?.addEventListener('abort', abort, { once: true });
 
     const append = (current, chunk) => {
       const next = Buffer.concat([current, Buffer.from(chunk)]);
@@ -49,6 +56,7 @@ export async function runCommand(command, args = [], options = {}) {
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
     child.on('close', (code, signal) => {
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abort);
       const result = {
         command,
         args,
@@ -60,6 +68,12 @@ export async function runCommand(command, args = [], options = {}) {
       };
       if (killedForOutput) {
         reject(new CommandError(`Command output exceeded ${maxOutput} bytes`, result));
+        return;
+      }
+      if (aborted) {
+        reject(options.signal?.reason instanceof Error
+          ? options.signal.reason
+          : new DOMException('Command cancelled', 'AbortError'));
         return;
       }
       if (signal === 'SIGKILL' && result.durationMs >= timeoutMs) {

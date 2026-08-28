@@ -11,6 +11,7 @@ import { McpGateway, modelSafeResult } from '../src/web/mcp-gateway.mjs';
 import { summarizeReport } from '../src/adapters/val3dity.mjs';
 import { getWebConfig } from '../src/web/env.mjs';
 import { configuredModel, createChatApplication, ensureRequestedDownloads } from '../src/web/server.mjs';
+import { runCommand } from '../src/core/command-runner.mjs';
 import { followUpSuggestions, inferSuggestionState, initialSuggestions, SUGGESTION_COUNT } from '../web/suggestions.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -18,6 +19,15 @@ const samplePath = path.join(projectRoot, 'examples', 'minimal.city.json');
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function sseResponse(events, status = 200) {
+  const body = events.map(event => `data: ${event === '[DONE]' ? event : JSON.stringify(event)}\n\n`).join('');
+  return new Response(body, { status, headers: { 'content-type': 'text/event-stream' } });
+}
+
+function ndjsonEvents(response) {
+  return response.body.toString('utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
 }
 
 function applicationRequest(server, method, url, body) {
@@ -134,8 +144,8 @@ test('HTML versions application assets to prevent cached UI mismatches', async (
     fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8'),
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
-  assert.match(html, /styles\.css\?v=15/);
-  assert.match(html, /app\.js\?v=19/);
+  assert.match(html, /styles\.css\?v=16/);
+  assert.match(html, /app\.js\?v=21/);
   assert.match(html, /favicon\.svg\?v=1/);
   assert.match(app, /messageActionButton\('Retry question', MESSAGE_ICONS\.retry/);
   assert.match(app, /messageActionButton\('Copy message', MESSAGE_ICONS\.copy/);
@@ -511,6 +521,167 @@ test('OpenAI-compatible model adapter relays function calls and results', async 
   assert.equal(requests[0].body.temperature, 0.1);
   assert.equal(requests[1].body.messages.at(-1).role, 'tool');
   assert.deepEqual(calls, [{ name: 'cityjson_info', args: { dataset_id: 'cj_test' } }]);
+});
+
+test('OpenAI-compatible model adapter streams text deltas', async () => {
+  const events = [];
+  const client = createModelClient({
+    provider: 'openai', apiKey: 'test', model: 'stream-model', baseUrl: 'https://example.test/v1',
+    maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async (url, options) => {
+    assert.equal(JSON.parse(options.body).stream, true);
+    return sseResponse([
+      { choices: [{ delta: { role: 'assistant', content: 'Validation ' }, finish_reason: null }] },
+      { choices: [{ delta: { content: 'complete.' }, finish_reason: 'stop' }] },
+      '[DONE]'
+    ]);
+  });
+  const result = await client.runTurn([], 'Validate it', [], async () => assert.fail('No tool expected'), {
+    onEvent: event => events.push(event)
+  });
+  assert.equal(result.text, 'Validation complete.');
+  assert.deepEqual(events.map(event => event.text), ['Validation ', 'complete.']);
+});
+
+test('OpenAI-compatible model adapter assembles streamed tool-call fragments', async () => {
+  const responses = [
+    sseResponse([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'cityjson_', arguments: '{"dataset' } }] }, finish_reason: null }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'info', arguments: '_id":"cj_test"}' } }] }, finish_reason: 'tool_calls' }] },
+      '[DONE]'
+    ]),
+    sseResponse([
+      { choices: [{ delta: { content: 'Two objects.' }, finish_reason: 'stop' }] },
+      '[DONE]'
+    ])
+  ];
+  const calls = [];
+  const client = createModelClient({
+    provider: 'openai', apiKey: 'test', model: 'stream-model', baseUrl: 'https://example.test/v1',
+    maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async () => responses.shift());
+  const result = await client.runTurn([], 'Inspect it', [], async (name, args) => {
+    calls.push({ name, args });
+    return { isError: false, modelContent: '{"cityObjectCount":2}' };
+  }, { onEvent() {} });
+  assert.deepEqual(calls, [{ name: 'cityjson_info', args: { dataset_id: 'cj_test' } }]);
+  assert.equal(result.text, 'Two objects.');
+});
+
+test('Anthropic model adapter streams text deltas', async () => {
+  const events = [];
+  const client = createModelClient({
+    provider: 'anthropic', apiKey: 'test', model: 'stream-model', baseUrl: 'https://example.test',
+    maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async (url, options) => {
+    assert.equal(JSON.parse(options.body).stream, true);
+    return sseResponse([
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Geometry ' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'checked.' } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' } }
+    ]);
+  });
+  const result = await client.runTurn([], 'Check it', [], async () => assert.fail('No tool expected'), {
+    onEvent: event => events.push(event)
+  });
+  assert.equal(result.text, 'Geometry checked.');
+  assert.deepEqual(events.map(event => event.text), ['Geometry ', 'checked.']);
+});
+
+test('Anthropic model adapter assembles streamed tool input', async () => {
+  const responses = [
+    sseResponse([
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tool-1', name: 'cityjson_info', input: {} } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"dataset_id":' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"cj_test"}' } },
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' } }
+    ]),
+    sseResponse([
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Two objects.' } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' } }
+    ])
+  ];
+  const calls = [];
+  const client = createModelClient({
+    provider: 'anthropic', apiKey: 'test', model: 'stream-model', baseUrl: 'https://example.test',
+    maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async () => responses.shift());
+  const result = await client.runTurn([], 'Inspect it', [], async (name, args) => {
+    calls.push({ name, args });
+    return { isError: false, modelContent: '{"cityObjectCount":2}' };
+  }, { onEvent() {} });
+  assert.deepEqual(calls, [{ name: 'cityjson_info', args: { dataset_id: 'cj_test' } }]);
+  assert.equal(result.text, 'Two objects.');
+});
+
+test('chat API streams progress and final response events as NDJSON', async t => {
+  const input = await fs.mkdtemp(path.join(os.tmpdir(), 'datum-stream-test-'));
+  const model = {
+    async runTurn(history, message, tools, callTool, { onEvent }) {
+      onEvent({ type: 'tool_start', id: 'tool-1', name: 'cityjson_validate' });
+      onEvent({ type: 'tool_progress', id: 'tool-1', name: 'cityjson_validate', progress: 1, total: 2, message: 'Structural validation complete' });
+      onEvent({ type: 'tool_end', id: 'tool-1', name: 'cityjson_validate', durationMs: 12, isError: false });
+      onEvent({ type: 'text_delta', text: 'All checks passed.' });
+      return { text: 'All checks passed.', history: [], trace: [{ name: 'cityjson_validate', durationMs: 12, isError: false }] };
+    }
+  };
+  const gateway = {
+    tools: [], async connect() {}, async close() {}, modelTools() { return []; },
+    async call(name) {
+      if (name !== 'cityjson_backend_status') throw new Error(`Unexpected tool ${name}`);
+      return { isError: false, structuredContent: { backends: Object.fromEntries(['cjio', 'cjval', 'val3dity', 'citygmlTools', 'cjdb'].map(key => [key, { available: true }])) } };
+    }
+  };
+  const config = getWebConfig({ MODEL_PROVIDER: 'openai', MODEL_NAME: 'test', MODEL_API_KEY: 'test', CITYJSON_MCP_INPUT: input });
+  const app = await createChatApplication(config, { gateway, model });
+  t.after(async () => { await app.close(); await fs.rm(input, { recursive: true, force: true }); });
+  const response = await applicationRequest(app.server, 'POST', '/api/chat', {
+    sessionId: 'stream-session-123', clientId: 'stream-client-123', message: 'Validate it', stream: true
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers['content-type'], /application\/x-ndjson/);
+  const events = ndjsonEvents(response);
+  assert.deepEqual(events.map(event => event.type), ['status', 'tool_start', 'tool_progress', 'tool_end', 'text_delta', 'complete']);
+  assert.equal(events.at(-1).message, 'All checks passed.');
+});
+
+test('chat cancellation aborts an active streamed turn', async t => {
+  const input = await fs.mkdtemp(path.join(os.tmpdir(), 'datum-cancel-test-'));
+  let turnStarted;
+  const started = new Promise(resolve => { turnStarted = resolve; });
+  const model = {
+    async runTurn(history, message, tools, callTool, { signal }) {
+      turnStarted();
+      await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      assert.fail('Cancelled turn must not complete');
+    }
+  };
+  const gateway = {
+    tools: [], async connect() {}, async close() {}, modelTools() { return []; },
+    async call(name) {
+      if (name !== 'cityjson_backend_status') throw new Error(`Unexpected tool ${name}`);
+      return { isError: false, structuredContent: { backends: Object.fromEntries(['cjio', 'cjval', 'val3dity', 'citygmlTools', 'cjdb'].map(key => [key, { available: true }])) } };
+    }
+  };
+  const config = getWebConfig({ MODEL_PROVIDER: 'openai', MODEL_NAME: 'test', MODEL_API_KEY: 'test', CITYJSON_MCP_INPUT: input });
+  const app = await createChatApplication(config, { gateway, model });
+  t.after(async () => { await app.close(); await fs.rm(input, { recursive: true, force: true }); });
+  const ids = { sessionId: 'cancel-session-123', clientId: 'cancel-client-123' };
+  const pending = applicationRequest(app.server, 'POST', '/api/chat', { ...ids, message: 'Run validation', stream: true });
+  await started;
+  const cancellation = await applicationRequest(app.server, 'POST', '/api/chat/cancel', ids);
+  assert.deepEqual(JSON.parse(cancellation.body), { cancelled: true });
+  const response = await pending;
+  assert.equal(ndjsonEvents(response).at(-1).type, 'cancelled');
+});
+
+test('command runner terminates a child process when its signal is aborted', async () => {
+  const controller = new AbortController();
+  const pending = runCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { signal: controller.signal, timeoutMs: 10_000 });
+  setTimeout(() => controller.abort(new DOMException('Cancelled by test', 'AbortError')), 20);
+  await assert.rejects(pending, error => error.name === 'AbortError');
 });
 
 test('OpenAI-compatible model adapter recovers when the first post-tool response is empty', async () => {

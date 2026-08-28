@@ -7,11 +7,11 @@ export class CjvalAdapter {
   }
   status() { return executableStatus(this.bin, ['--help']); }
 
-  async validate(datasetId, extensionSchemas = []) {
+  async validate(datasetId, extensionSchemas = [], options = {}) {
     const ds = this.dm.get(datasetId);
     const args = ['--report', ds.path];
     for (const ext of extensionSchemas) args.push('-e', this.dm.pathPolicy.assertReadable(ext));
-    const result = await runCommand(this.bin, args, { allowNonZero: true });
+    const result = await runCommand(this.bin, args, { allowNonZero: true, signal: options.signal });
     let report = null;
     try { report = JSON.parse(result.stdout.trim()); } catch {}
     return {

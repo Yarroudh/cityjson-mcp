@@ -33,7 +33,7 @@ export function modelSafeResult(result, maxChars) {
       return JSON.stringify({ type: item.type, omitted: true });
     }).join('\n');
   }
-  if (value.length > maxChars) return `${value.slice(0, maxChars)}\n…[tool result truncated by chat host]`;
+  if (value.length > maxChars) return `${value.slice(0, maxChars)}\n[tool result truncated by chat host]`;
   return value;
 }
 
@@ -95,9 +95,20 @@ export class McpGateway {
     this.tools = (await this.client.listTools()).tools;
   }
 
-  async call(name, args = {}) {
+  async call(name, args = {}, { signal, onProgress } = {}) {
     if (!this.client) throw new Error('MCP gateway is not connected');
-    const raw = await this.client.callTool({ name, arguments: args });
+    const timeout = Number(process.env.CITYJSON_MCP_COMMAND_TIMEOUT_MS || 120000) + 30_000;
+    const raw = await this.client.callTool({ name, arguments: args }, {
+      signal,
+      onprogress: progress => onProgress?.({
+        progress: progress.progress,
+        total: progress.total,
+        message: progress.message
+      }),
+      resetTimeoutOnProgress: true,
+      timeout,
+      maxTotalTimeout: timeout
+    });
     return {
       isError: raw.isError === true,
       modelContent: modelSafeResult(raw, this.maxToolResultChars),

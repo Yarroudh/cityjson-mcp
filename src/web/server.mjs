@@ -25,6 +25,19 @@ function sendJson(response, status, value) {
   response.end(JSON.stringify(value));
 }
 
+function beginEventStream(response) {
+  response.writeHead(200, {
+    'content-type': 'application/x-ndjson; charset=utf-8',
+    'cache-control': 'no-cache, no-store',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no'
+  });
+  response.flushHeaders?.();
+  return event => {
+    if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
+  };
+}
+
 async function readJson(request, maxBytes = 1024 * 1024) {
   const chunks = [];
   let size = 0;
@@ -70,14 +83,23 @@ function publicModelConfig(config) {
   return { provider: config.provider, model: config.model, baseUrl: config.baseUrl };
 }
 
-export async function ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId = latestDatasetId) {
+export async function ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId = latestDatasetId, options = {}) {
   const requested = /\b(download|save (?:it|this|the (?:result|file|dataset)) locally|give me (?:the |a )?file)\b/i.test(message);
   if (!requested || resources.length > 0 || !latestDatasetId) return resources;
   const derivedDatasetRequested = /\b(subset|filter|reproject|transform|triangulat|clean(?:up)?|merge|convert)\b/i.test(message);
   if (derivedDatasetRequested && latestDatasetId === sourceDatasetId) {
     throw new Error('The requested dataset transformation was not completed, so the original file was not offered as the result');
   }
-  const fallback = await gateway.call('cityjson_download', { dataset_id: latestDatasetId });
+  options.onEvent?.({ type: 'tool_start', id: 'download-fallback', name: 'cityjson_download' });
+  const startedAt = Date.now();
+  const fallback = await gateway.call('cityjson_download', { dataset_id: latestDatasetId }, options);
+  options.onEvent?.({
+    type: 'tool_end',
+    id: 'download-fallback',
+    name: 'cityjson_download',
+    durationMs: Date.now() - startedAt,
+    isError: fallback.isError === true
+  });
   if (!fallback.isError) resources.push(...(fallback.downloads || []));
   return resources;
 }
@@ -161,6 +183,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
   const uploadBatches = new Map();
   const modelConfigurations = new Map();
   const downloadStore = new Map();
+  const activeTurns = new Map();
   const batchTtlMs = 8 * 60 * 60 * 1000;
   const downloadTtlMs = 30 * 60 * 1000;
   const modelConfigurationTtlMs = 8 * 60 * 60 * 1000;
@@ -204,6 +227,9 @@ export async function createChatApplication(config = getWebConfig(), dependencie
   }
 
   function clearClientSessions(clientId) {
+    for (const active of activeTurns.values()) {
+      if (active.clientId === clientId) active.controller.abort(new DOMException('The model configuration changed', 'AbortError'));
+    }
     for (const [sessionId, session] of sessions) if (session.clientId === clientId) sessions.delete(sessionId);
   }
 
@@ -228,6 +254,9 @@ export async function createChatApplication(config = getWebConfig(), dependencie
   }
 
   const server = http.createServer(async (request, response) => {
+    let streamEvent = null;
+    let turnController = null;
+    let turnCleanup = null;
     response.setHeader('x-content-type-options', 'nosniff');
     response.setHeader('x-frame-options', 'DENY');
     response.setHeader('referrer-policy', 'no-referrer');
@@ -348,12 +377,41 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         return;
       }
 
+      if (request.method === 'POST' && url.pathname === '/api/chat/cancel') {
+        const body = await readJson(request, 32 * 1024);
+        const id = sessionKey(body.sessionId);
+        const browserId = clientKey(body.clientId);
+        const active = activeTurns.get(id);
+        if (active && active.clientId === browserId) {
+          active.controller.abort(new DOMException('The chat turn was cancelled', 'AbortError'));
+          sendJson(response, 200, { cancelled: true });
+        } else {
+          sendJson(response, 200, { cancelled: false });
+        }
+        return;
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/chat') {
         const body = await readJson(request);
         const id = sessionKey(body.sessionId);
         const browserId = clientKey(body.clientId);
+        if (activeTurns.has(id)) throw new Error('A response is already in progress for this conversation');
         const selected = modelFor(browserId);
         if (!selected.client) throw new Error('Configure a model before sending a message');
+        turnController = new AbortController();
+        activeTurns.set(id, { clientId: browserId, controller: turnController });
+        turnCleanup = () => {
+          if (activeTurns.get(id)?.controller === turnController) activeTurns.delete(id);
+        };
+        if (body.stream === true) {
+          streamEvent = beginEventStream(response);
+          streamEvent({ type: 'status', phase: 'preparing', message: 'Preparing the conversation' });
+          response.once('close', () => {
+            if (!response.writableEnded && !turnController.signal.aborted) {
+              turnController.abort(new DOMException('The browser disconnected', 'AbortError'));
+            }
+          });
+        }
         if (modelConfigurations.has(browserId)) modelConfigurations.get(browserId).updatedAt = Date.now();
         const modelFingerprint = `${selected.config.provider}\u0000${selected.config.model}\u0000${selected.config.baseUrl}`;
         const batch = body.batchId ? uploadBatches.get(body.batchId) : undefined;
@@ -389,11 +447,11 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         let latestDatasetId = batch?.files.at(-1)?.summary?.datasetId || previousDatasetId || requestedDatasetId;
         if (batch?.files.length) latestDatasetIsDerived = false;
         if (!batch && !previousDatasetId && latestDatasetId) {
-          const inspection = await gateway.call('cityjson_info', { dataset_id: latestDatasetId });
+          const inspection = await gateway.call('cityjson_info', { dataset_id: latestDatasetId }, { signal: turnController.signal });
           if (inspection.isError) {
             if (latestDatasetIsDerived) throw new Error('The derived dataset for this conversation expired after the server restarted. Recreate the transformation from the original file.');
             if (!storedFilename) throw new Error('The active dataset expired and its source filename is unavailable. Import the file again.');
-            const recovered = await gateway.call('cityjson_import', { filename: storedFilename });
+            const recovered = await gateway.call('cityjson_import', { filename: storedFilename }, { signal: turnController.signal });
             if (recovered.isError || typeof recovered.structuredContent?.datasetId !== 'string') {
               throw new Error(`The active conversation file could not be restored: ${recovered.modelContent || 'import failed'}`);
             }
@@ -405,8 +463,8 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const checkpoint = { historyBefore: history, latestDatasetIdBefore: latestDatasetId, latestDatasetIsDerivedBefore: latestDatasetIsDerived };
         const sourceDatasetId = latestDatasetId;
         const resources = [];
-        const callTool = async (name, args) => {
-          const toolResult = await gateway.call(name, args);
+        const callTool = async (name, args, options = {}) => {
+          const toolResult = await gateway.call(name, args, options);
           if (!toolResult.isError && typeof toolResult.structuredContent?.datasetId === 'string') {
             const changedDataset = toolResult.structuredContent.datasetId !== latestDatasetId;
             latestDatasetId = toolResult.structuredContent.datasetId;
@@ -419,9 +477,17 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           history,
           userMessage,
           gateway.modelTools(selected.config.provider),
-          callTool
+          callTool,
+          {
+            signal: turnController.signal,
+            onEvent: streamEvent || undefined
+          }
         );
-        await ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId);
+        await ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId, {
+          signal: turnController.signal,
+          onEvent: streamEvent || undefined,
+          onProgress: progress => streamEvent?.({ type: 'tool_progress', id: 'download-fallback', name: 'cityjson_download', ...progress })
+        });
         sessions.set(id, {
           history: result.history,
           updatedAt: Date.now(),
@@ -432,14 +498,20 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           turns: [...turns, checkpoint]
         });
         pruneState();
-        sendJson(response, 200, {
+        const payload = {
           message: result.text,
           trace: result.trace,
           attachments: batch?.files || [],
           downloads: registerDownloads(resources),
           datasetId: latestDatasetId,
           datasetIsDerived: latestDatasetIsDerived
-        });
+        };
+        if (streamEvent) {
+          streamEvent({ type: 'complete', ...payload });
+          response.end();
+        } else {
+          sendJson(response, 200, payload);
+        }
         return;
       }
 
@@ -498,7 +570,9 @@ export async function createChatApplication(config = getWebConfig(), dependencie
 
       if (request.method === 'POST' && url.pathname === '/api/session/reset') {
         const body = await readJson(request);
-        sessions.delete(sessionKey(body.sessionId));
+        const id = sessionKey(body.sessionId);
+        activeTurns.get(id)?.controller.abort(new DOMException('The conversation was reset', 'AbortError'));
+        sessions.delete(id);
         sendJson(response, 200, { reset: true });
         return;
       }
@@ -506,8 +580,18 @@ export async function createChatApplication(config = getWebConfig(), dependencie
       if (request.method === 'GET' && await staticResponse(url.pathname, response)) return;
       sendJson(response, 404, { error: 'Not found' });
     } catch (error) {
-      const status = /too large|exceeds|At most/.test(error.message) ? 413 : 400;
-      sendJson(response, status, { error: error.message });
+      if (streamEvent) {
+        const cancelled = turnController?.signal.aborted || error?.name === 'AbortError';
+        streamEvent(cancelled
+          ? { type: 'cancelled', message: 'Response cancelled.' }
+          : { type: 'error', error: error.message });
+        if (!response.writableEnded) response.end();
+      } else {
+        const status = /too large|exceeds|At most/.test(error.message) ? 413 : 400;
+        sendJson(response, status, { error: error.message });
+      }
+    } finally {
+      turnCleanup?.();
     }
   });
 
@@ -515,6 +599,8 @@ export async function createChatApplication(config = getWebConfig(), dependencie
     server,
     gateway,
     async close() {
+      for (const active of activeTurns.values()) active.controller.abort(new DOMException('The server is shutting down', 'AbortError'));
+      activeTurns.clear();
       if (server.listening) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
       await gateway.close();
     }

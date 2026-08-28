@@ -10,15 +10,15 @@ export class CjioAdapter {
 
   status() { return executableStatus(this.bin, ['--version']); }
 
-  async transform(datasetId, operation, opArgs = [], suffix = 'city.json') {
+  async transform(datasetId, operation, opArgs = [], suffix = 'city.json', options = {}) {
     const ds = this.dm.get(datasetId);
     const output = this.dm.makeDerivedPath(datasetId, suffix);
     const args = ['--suppress_msg', ds.path, operation, ...opArgs, 'save', output];
-    const result = await runCommand(this.bin, args);
+    const result = await runCommand(this.bin, args, { signal: options.signal });
     return { result, derived: await this.dm.registerDerived(output, `cjio:${operation}`, [datasetId]) };
   }
 
-  async subset(datasetId, options) {
+  async subset(datasetId, options, commandOptions = {}) {
     const args = [];
     for (const id of options.ids || []) args.push('--id', id);
     if (options.bbox) args.push('--bbox', ...options.bbox.map(String));
@@ -27,46 +27,46 @@ export class CjioAdapter {
     for (const type of options.types || []) args.push('--cotype', type);
     if (options.exclude) args.push('--exclude');
     if (!args.length) throw new Error('cityjson_subset requires ids, bbox, radius, random, or types');
-    return this.transform(datasetId, 'subset', args);
+    return this.transform(datasetId, 'subset', args, 'city.json', commandOptions);
   }
 
-  filterLod(datasetId, lod) { return this.transform(datasetId, 'lod_filter', [String(lod)]); }
-  reproject(datasetId, epsg, digit) {
+  filterLod(datasetId, lod, options = {}) { return this.transform(datasetId, 'lod_filter', [String(lod)], 'city.json', options); }
+  reproject(datasetId, epsg, digit, options = {}) {
     const args = [String(epsg)];
     if (digit !== undefined) args.push('--digit', String(digit));
-    return this.transform(datasetId, 'crs_reproject', args);
+    return this.transform(datasetId, 'crs_reproject', args, 'city.json', options);
   }
-  assignCrs(datasetId, epsg) { return this.transform(datasetId, 'crs_assign', [String(epsg)]); }
-  translate(datasetId, minxyz) {
+  assignCrs(datasetId, epsg, options = {}) { return this.transform(datasetId, 'crs_assign', [String(epsg)], 'city.json', options); }
+  translate(datasetId, minxyz, options = {}) {
     const args = minxyz ? ['--minxyz', ...minxyz.map(String)] : [];
-    return this.transform(datasetId, 'crs_translate', args);
+    return this.transform(datasetId, 'crs_translate', args, 'city.json', options);
   }
-  clean(datasetId) { return this.transform(datasetId, 'vertices_clean'); }
-  triangulate(datasetId, sloppy = false) { return this.transform(datasetId, 'triangulate', sloppy ? ['--sloppy'] : []); }
-  removeTextures(datasetId) { return this.transform(datasetId, 'textures_remove'); }
-  removeMaterials(datasetId) { return this.transform(datasetId, 'materials_remove'); }
-  renameAttribute(datasetId, oldName, newName) { return this.transform(datasetId, 'attribute_rename', [oldName, newName]); }
-  removeAttribute(datasetId, name) { return this.transform(datasetId, 'attribute_remove', [name]); }
-  upgrade(datasetId) { return this.transform(datasetId, 'upgrade'); }
+  clean(datasetId, options = {}) { return this.transform(datasetId, 'vertices_clean', [], 'city.json', options); }
+  triangulate(datasetId, sloppy = false, options = {}) { return this.transform(datasetId, 'triangulate', sloppy ? ['--sloppy'] : [], 'city.json', options); }
+  removeTextures(datasetId, options = {}) { return this.transform(datasetId, 'textures_remove', [], 'city.json', options); }
+  removeMaterials(datasetId, options = {}) { return this.transform(datasetId, 'materials_remove', [], 'city.json', options); }
+  renameAttribute(datasetId, oldName, newName, options = {}) { return this.transform(datasetId, 'attribute_rename', [oldName, newName], 'city.json', options); }
+  removeAttribute(datasetId, name, options = {}) { return this.transform(datasetId, 'attribute_remove', [name], 'city.json', options); }
+  upgrade(datasetId, options = {}) { return this.transform(datasetId, 'upgrade', [], 'city.json', options); }
 
-  async merge(datasetIds) {
+  async merge(datasetIds, options = {}) {
     if (!Array.isArray(datasetIds) || datasetIds.length < 2) throw new Error('cityjson_merge needs at least two dataset IDs');
     const [first, ...rest] = datasetIds.map(id => this.dm.get(id));
     const output = this.dm.makeDerivedPath(datasetIds[0], 'city.json');
     const args = ['--suppress_msg', first.path];
     for (const other of rest) args.push('merge', other.path);
     args.push('save', output);
-    const result = await runCommand(this.bin, args);
+    const result = await runCommand(this.bin, args, { signal: options.signal });
     return { result, derived: await this.dm.registerDerived(output, 'cjio:merge', datasetIds) };
   }
 
-  async export(datasetId, format, destination, sloppy = false) {
+  async export(datasetId, format, destination, sloppy = false, options = {}) {
     const ds = this.dm.get(datasetId);
     const output = this.dm.pathPolicy.assertWritable(destination);
     const args = ['--suppress_msg', ds.path, 'export'];
     if (sloppy) args.push('--sloppy');
     args.push(format, output);
-    const result = await runCommand(this.bin, args);
+    const result = await runCommand(this.bin, args, { signal: options.signal });
     const produced = [];
     try { produced.push(output, ...(format === 'obj' ? [output.replace(/\.obj$/i, '.mtl')] : [])); } catch {}
     const existing = [];

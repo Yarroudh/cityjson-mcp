@@ -443,8 +443,8 @@ Do not include API keys, database passwords, private CityJSON datasets, generate
 ## Next
 
 - [ ] Add explicit Ollama setup and model presets for local OpenAI-compatible models.
-- [ ] Stream model responses and tool progress to the browser.
-- [ ] Add cancellation and progress reporting for long validation and conversion jobs.
+- [x] Stream model responses and tool progress to the browser.
+- [x] Add cancellation and progress reporting for long validation and conversion jobs.
 - [x] Add an optional 3D preview for imported and derived datasets.
 - [ ] Add management controls for cached conversations, model profiles, and workspace files.
 

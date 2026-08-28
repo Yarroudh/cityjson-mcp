@@ -12,10 +12,26 @@ const dbConnection = z.object({
 });
 
 function safe(handler) {
-  return async args => {
-    try { return await handler(args || {}); }
-    catch (error) { return errorResult(error); }
+  return async (args, ctx) => {
+    try { return await handler(args || {}, ctx); }
+    catch (error) {
+      if (ctx?.mcpReq?.signal?.aborted || error?.name === 'AbortError') throw error;
+      return errorResult(error);
+    }
   };
+}
+
+function commandOptions(ctx) {
+  return { signal: ctx?.mcpReq?.signal };
+}
+
+async function reportProgress(ctx, progress, total, message) {
+  const progressToken = ctx?.mcpReq?._meta?.progressToken;
+  if (progressToken === undefined) return;
+  await ctx.mcpReq.notify({
+    method: 'notifications/progress',
+    params: { progressToken, progress, total, message }
+  });
 }
 
 function commandSummary(result) {
@@ -156,20 +172,42 @@ export function registerTools(server, deps) {
     title: 'Validate CityJSON syntax and schema',
     description: 'Validate a dataset with the official cjval validator: JSON syntax, CityJSON schemas, extensions and additional structural consistency checks.',
     inputSchema: z.object({ dataset_id: datasetId, extension_schemas: z.array(z.string()).default([]) })
-  }, safe(async ({ dataset_id, extension_schemas }) => jsonResult(await cjval.validate(dataset_id, extension_schemas))));
+  }, safe(async ({ dataset_id, extension_schemas }, ctx) => {
+    await reportProgress(ctx, 0, 1, 'Running structural validation');
+    const result = await cjval.validate(dataset_id, extension_schemas, commandOptions(ctx));
+    await reportProgress(ctx, 1, 1, 'Structural validation complete');
+    return jsonResult(result);
+  }));
 
   server.registerTool('cityjson_validate_geometry', {
     title: 'Validate 3D geometry',
     description: 'Validate CityJSON 3D primitives with val3dity according to ISO 19107 concepts and CityJSON-specific geometric checks. Returns a detailed report plus a compact reportSummary containing every invalid object ID and error-code count.',
     inputSchema: z.object({ dataset_id: datasetId, verbose: z.boolean().default(false) })
-  }, safe(async ({ dataset_id, verbose }) => jsonResult(await val3dity.validate(dataset_id, { verbose }))));
+  }, safe(async ({ dataset_id, verbose }, ctx) => {
+    await reportProgress(ctx, 0, 1, 'Running geometric validation');
+    const result = await val3dity.validate(dataset_id, { verbose, ...commandOptions(ctx) });
+    await reportProgress(ctx, 1, 1, 'Geometric validation complete');
+    return jsonResult(result);
+  }));
 
   server.registerTool('cityjson_validate', {
     title: 'Validate CityJSON completely',
     description: 'Run cjval and val3dity and return one combined structural + geometric validation result. geometry.reportSummary contains the complete invalidObjectIds list for reliable follow-up subsets.',
     inputSchema: z.object({ dataset_id: datasetId })
-  }, safe(async ({ dataset_id }) => {
-    const [schema, geometry] = await Promise.allSettled([cjval.validate(dataset_id), val3dity.validate(dataset_id)]);
+  }, safe(async ({ dataset_id }, ctx) => {
+    await reportProgress(ctx, 0, 2, 'Starting structural and geometric validation');
+    let completed = 0;
+    const tracked = async (promise, message) => {
+      try { return await promise; }
+      finally {
+        completed += 1;
+        await reportProgress(ctx, completed, 2, message);
+      }
+    };
+    const [schema, geometry] = await Promise.allSettled([
+      tracked(cjval.validate(dataset_id, [], commandOptions(ctx)), 'Structural validation complete'),
+      tracked(val3dity.validate(dataset_id, commandOptions(ctx)), 'Geometric validation complete')
+    ]);
     const schemaResult = schema.status === 'fulfilled' ? schema.value : { valid: null, error: schema.reason?.message };
     const geometryResult = geometry.status === 'fulfilled' ? geometry.value : { valid: null, error: geometry.reason?.message };
     const complete = typeof schemaResult.valid === 'boolean' && typeof geometryResult.valid === 'boolean';
@@ -189,8 +227,8 @@ export function registerTools(server, deps) {
       types: z.array(z.string()).optional(),
       exclude: z.boolean().default(false)
     })
-  }, safe(async ({ dataset_id, ...options }) => {
-    const r = await cjio.subset(dataset_id, options);
+  }, safe(async ({ dataset_id, ...options }, ctx) => {
+    const r = await cjio.subset(dataset_id, options, commandOptions(ctx));
     return jsonResult({ ...r.derived, backend: 'cjio', command: commandSummary(r.result) });
   }));
 
@@ -198,95 +236,95 @@ export function registerTools(server, deps) {
     title: 'Filter CityJSON LoD',
     description: 'Keep only one level of detail using cjio lod_filter. Returns a new dataset_id.',
     inputSchema: z.object({ dataset_id: datasetId, lod: z.string().min(1) })
-  }, safe(async ({ dataset_id, lod }) => {
-    const r = await cjio.filterLod(dataset_id, lod); return jsonResult({ ...r.derived, backend: 'cjio', command: commandSummary(r.result) });
+  }, safe(async ({ dataset_id, lod }, ctx) => {
+    const r = await cjio.filterLod(dataset_id, lod, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio', command: commandSummary(r.result) });
   }));
 
   server.registerTool('cityjson_reproject', {
     title: 'Reproject CityJSON',
     description: 'Reproject coordinates to a target EPSG CRS with cjio. The source dataset must already define a CRS. Returns a new dataset_id.',
     inputSchema: z.object({ dataset_id: datasetId, epsg: z.number().int().positive(), digit: z.number().int().min(1).max(12).optional() })
-  }, safe(async ({ dataset_id, epsg, digit }) => {
-    const r = await cjio.reproject(dataset_id, epsg, digit); return jsonResult({ ...r.derived, backend: 'cjio', command: commandSummary(r.result) });
+  }, safe(async ({ dataset_id, epsg, digit }, ctx) => {
+    const r = await cjio.reproject(dataset_id, epsg, digit, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio', command: commandSummary(r.result) });
   }));
 
   server.registerTool('cityjson_assign_crs', {
     title: 'Assign CityJSON CRS',
     description: 'Assign/update the EPSG reference without changing coordinate values using cjio. Returns a new dataset_id.',
     inputSchema: z.object({ dataset_id: datasetId, epsg: z.number().int().positive() })
-  }, safe(async ({ dataset_id, epsg }) => { const r = await cjio.assignCrs(dataset_id, epsg); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id, epsg }, ctx) => { const r = await cjio.assignCrs(dataset_id, epsg, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_translate', {
     title: 'Translate CityJSON coordinates',
     description: 'Translate CityJSON coordinates with cjio. With minxyz, coordinates are shifted relative to the supplied minimum; without it cjio uses the model minimum.',
     inputSchema: z.object({ dataset_id: datasetId, minxyz: z.tuple([z.number(), z.number(), z.number()]).optional() })
-  }, safe(async ({ dataset_id, minxyz }) => { const r = await cjio.translate(dataset_id, minxyz); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id, minxyz }, ctx) => { const r = await cjio.translate(dataset_id, minxyz, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_clean_vertices', {
     title: 'Clean CityJSON vertices',
     description: 'Remove duplicate and orphan vertices with cjio vertices_clean. Returns a new dataset_id.',
     inputSchema: z.object({ dataset_id: datasetId })
-  }, safe(async ({ dataset_id }) => { const r = await cjio.clean(dataset_id); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id }, ctx) => { const r = await cjio.clean(dataset_id, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_triangulate', {
     title: 'Triangulate CityJSON',
     description: 'Triangulate surfaces with cjio. Use sloppy=true only when the robust triangulator fails.',
     inputSchema: z.object({ dataset_id: datasetId, sloppy: z.boolean().default(false) })
-  }, safe(async ({ dataset_id, sloppy }) => { const r = await cjio.triangulate(dataset_id, sloppy); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id, sloppy }, ctx) => { const r = await cjio.triangulate(dataset_id, sloppy, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_merge', {
     title: 'Merge CityJSON datasets',
     description: 'Merge two or more opened CityJSON datasets with cjio. Returns a new dataset_id.',
     inputSchema: z.object({ dataset_ids: z.array(datasetId).min(2) })
-  }, safe(async ({ dataset_ids }) => { const r = await cjio.merge(dataset_ids); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_ids }, ctx) => { const r = await cjio.merge(dataset_ids, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_attribute_rename', {
     title: 'Rename CityJSON attribute',
     description: 'Rename an attribute across CityObjects with cjio.',
     inputSchema: z.object({ dataset_id: datasetId, old_name: z.string().min(1), new_name: z.string().min(1) })
-  }, safe(async ({ dataset_id, old_name, new_name }) => { const r = await cjio.renameAttribute(dataset_id, old_name, new_name); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id, old_name, new_name }, ctx) => { const r = await cjio.renameAttribute(dataset_id, old_name, new_name, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_attribute_remove', {
     title: 'Remove CityJSON attribute',
     description: 'Remove an attribute across CityObjects with cjio.',
     inputSchema: z.object({ dataset_id: datasetId, name: z.string().min(1) })
-  }, safe(async ({ dataset_id, name }) => { const r = await cjio.removeAttribute(dataset_id, name); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id, name }, ctx) => { const r = await cjio.removeAttribute(dataset_id, name, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_remove_textures', {
     title: 'Remove CityJSON textures',
     description: 'Remove all textures with cjio. Returns a new dataset_id.',
     inputSchema: z.object({ dataset_id: datasetId })
-  }, safe(async ({ dataset_id }) => { const r = await cjio.removeTextures(dataset_id); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id }, ctx) => { const r = await cjio.removeTextures(dataset_id, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_remove_materials', {
     title: 'Remove CityJSON materials',
     description: 'Remove all materials with cjio. Returns a new dataset_id.',
     inputSchema: z.object({ dataset_id: datasetId })
-  }, safe(async ({ dataset_id }) => { const r = await cjio.removeMaterials(dataset_id); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id }, ctx) => { const r = await cjio.removeMaterials(dataset_id, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_upgrade', {
     title: 'Upgrade CityJSON',
     description: 'Upgrade an older supported CityJSON file to the version supported by the installed cjio.',
     inputSchema: z.object({ dataset_id: datasetId })
-  }, safe(async ({ dataset_id }) => { const r = await cjio.upgrade(dataset_id); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
+  }, safe(async ({ dataset_id }, ctx) => { const r = await cjio.upgrade(dataset_id, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_export', {
     title: 'Export CityJSON',
     description: 'Export an opened CityJSON dataset with cjio to jsonl, obj, stl, glb or b3dm.',
     inputSchema: z.object({ dataset_id: datasetId, format: z.enum(['jsonl','obj','stl','glb','b3dm']), destination: z.string().min(1), sloppy: z.boolean().default(false) })
-  }, safe(async args => jsonResult(await cjio.export(args.dataset_id, args.format, args.destination, args.sloppy))));
+  }, safe(async (args, ctx) => jsonResult(await cjio.export(args.dataset_id, args.format, args.destination, args.sloppy, commandOptions(ctx)))));
 
   server.registerTool('citygml_to_cityjson', {
     title: 'Convert CityGML to CityJSON',
     description: 'Convert a CityGML 1.0/2.0/3.0 GML/XML dataset to CityJSON using citygml-tools. A regular CityJSON output is automatically opened and returned as a dataset_id.',
     inputSchema: z.object({ source: z.string().min(1), json_lines: z.boolean().default(false) })
-  }, safe(async ({ source, json_lines }) => jsonResult(await citygml.toCityJSON(source, { jsonLines: json_lines }))));
+  }, safe(async ({ source, json_lines }, ctx) => jsonResult(await citygml.toCityJSON(source, { jsonLines: json_lines, ...commandOptions(ctx) }))));
 
   server.registerTool('cityjson_to_citygml', {
     title: 'Convert CityJSON to CityGML',
     description: 'Convert an opened CityJSON dataset to CityGML using citygml-tools. The installed citygml-tools version controls the default target encoding.',
     inputSchema: z.object({ dataset_id: datasetId, crs_name: z.string().optional(), output_directory: z.string().optional() })
-  }, safe(async ({ dataset_id, crs_name, output_directory }) => jsonResult(await citygml.fromCityJSON(dataset_id, { crsName: crs_name, outputDirectory: output_directory }))));
+  }, safe(async ({ dataset_id, crs_name, output_directory }, ctx) => jsonResult(await citygml.fromCityJSON(dataset_id, { crsName: crs_name, outputDirectory: output_directory, ...commandOptions(ctx) }))));
 
   server.registerTool('cityjson_db_import', {
     title: 'Import CityJSON into cjdb',

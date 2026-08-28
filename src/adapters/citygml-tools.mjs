@@ -26,7 +26,7 @@ export class CitygmlToolsAdapter {
     const args = ['to-cityjson', '--output', outDir];
     if (options.jsonLines) args.push('--json-lines');
     args.push(input);
-    const result = await runCommand(this.bin, args);
+    const result = await runCommand(this.bin, args, { signal: options.signal });
     const files = (await listFilesRecursive(outDir)).filter(p => /\.(json|jsonl)$/i.test(p));
     if (!files.length) throw new Error(`citygml-tools completed but no CityJSON output was found in ${outDir}`);
     const cityJsonFile = files.find(p => !/\.jsonl$/i.test(p));
@@ -43,7 +43,7 @@ export class CitygmlToolsAdapter {
     const args = ['from-cityjson', '--output', outDir];
     if (options.crsName) args.push('--crs-name', options.crsName);
     args.push(ds.path);
-    const result = await runCommand(this.bin, args);
+    const result = await runCommand(this.bin, args, { signal: options.signal });
     const files = (await listFilesRecursive(outDir)).filter(p => /\.(gml|xml)$/i.test(p));
     return { datasetId, outputDirectory: outDir, files, stdout: result.stdout, stderr: result.stderr };
   }
