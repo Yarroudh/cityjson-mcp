@@ -511,6 +511,7 @@ If you use this project in your research, please cite it as follows.
   doi       = {10.5281/zenodo.22151334},
   url       = {https://doi.org/10.5281/zenodo.22151334}
 }
+```
 
 ## License
 
