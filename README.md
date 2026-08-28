@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/CityJSON-2.0.2-e0a05b.svg" alt="CityJSON 2.0.2">
   <img src="https://img.shields.io/badge/MCP_tools-37-5c6ac4.svg" alt="37 MCP tools">
   <a href="https://hub.docker.com/r/yarroudh/cityjson-mcp"><img src="https://img.shields.io/badge/Docker-yarroudh%2Fcityjson--mcp-2496ed.svg" alt="Docker image"></a>
+  <a href="https://doi.org/10.5281/zenodo.22151334"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.22151334.svg" alt="DOI"></a>
 </p>
 
 CityJSON MCP provides a web chat application and an MCP server for CityJSON files. It supports inspection, queries, validation, transformations, export, CityGML conversion, and cjdb/PostGIS operations.
@@ -489,6 +490,27 @@ npm run docker:doctor
 - [citygml-tools](https://github.com/citygml4j/citygml-tools)
 - [cjdb](https://github.com/cityjson/cjdb)
 - [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+
+## Citation
+
+If you use this project in your research, please cite it as follows.
+
+### APA
+
+> Yarroudh. (2026). Yarroudh/cityjson-mcp: CityJSON MCP & Datum Chat Application (Version 0.2.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.22151334
+
+### BibTeX
+
+```bibtex
+@software{yarroudh2026cityjsonmcp,
+  author    = {Yarroudh},
+  title     = {Yarroudh/cityjson-mcp: CityJSON MCP \& Datum Chat Application},
+  year      = {2026},
+  version   = {0.2.0},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.22151334},
+  url       = {https://doi.org/10.5281/zenodo.22151334}
+}
 
 ## License
 
