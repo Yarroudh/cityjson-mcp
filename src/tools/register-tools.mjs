@@ -160,13 +160,13 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_validate_geometry', {
     title: 'Validate 3D geometry',
-    description: 'Validate CityJSON 3D primitives with val3dity according to ISO 19107 concepts and CityJSON-specific geometric checks. Produces a detailed JSON report when available.',
+    description: 'Validate CityJSON 3D primitives with val3dity according to ISO 19107 concepts and CityJSON-specific geometric checks. Returns a detailed report plus a compact reportSummary containing every invalid object ID and error-code count.',
     inputSchema: z.object({ dataset_id: datasetId, verbose: z.boolean().default(false) })
   }, safe(async ({ dataset_id, verbose }) => jsonResult(await val3dity.validate(dataset_id, { verbose }))));
 
   server.registerTool('cityjson_validate', {
     title: 'Validate CityJSON completely',
-    description: 'Run cjval and val3dity and return one combined structural + geometric validation result.',
+    description: 'Run cjval and val3dity and return one combined structural + geometric validation result. geometry.reportSummary contains the complete invalidObjectIds list for reliable follow-up subsets.',
     inputSchema: z.object({ dataset_id: datasetId })
   }, safe(async ({ dataset_id }) => {
     const [schema, geometry] = await Promise.allSettled([cjval.validate(dataset_id), val3dity.validate(dataset_id)]);

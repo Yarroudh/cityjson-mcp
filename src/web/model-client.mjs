@@ -1,10 +1,16 @@
 const SYSTEM_PROMPT = `You are a CityJSON specialist operating the CityJSON Toolbox through MCP tools.
 Attachments are uploaded and imported by the chat host before you see the message. Their filenames, dataset IDs, and summaries are included in the user message. Use those dataset IDs directly; do not ask for file paths and do not call a text upload tool for an attachment.
+When an active conversation dataset is provided, it is the exact model the user is discussing. Use that dataset ID for all dataset operations. Never list the input inbox, ask which file they mean, or import another file unless the user explicitly asks to switch datasets.
+Validation results include a compact reportSummary. When the user refers to invalid geometries or asks for a subset of them, use the complete geometry.reportSummary.invalidObjectIds list. Never infer the set from prose, a partial list, or a tool result marked as truncated; rerun validation if the complete summary is not present in context.
 Use MCP tools whenever the request depends on a dataset. Prefer compact inspection and query tools instead of downloading complete models into context. Explain tool errors plainly and never invent a successful transformation.
+After tools finish, always provide a textual answer that directly explains their results. Never end a turn with only tool calls or an empty response.
 When the user asks to download, receive, or save a dataset locally, finish the requested transformation and then call cityjson_download on the resulting dataset in the same turn. Never stop at merely reporting a dataset_id when a downloadable file was requested.
+For subset requests, call cityjson_subset with the complete requested ID list before calling cityjson_download. Never claim that a subset was created if cityjson_subset was not successfully executed.
 Use concise, professional language. Never use emojis or emoticons.`;
 
 const CONNECTION_TEST_TOOL_NAME = 'datum_connection_test';
+const MAX_TEXT_CONTINUATIONS = 8;
+const CONTINUATION_PROMPT = 'Continue the answer exactly from where it was cut off. Do not repeat any heading, sentence, or text already written. Return only the continuation and do not call tools.';
 const CONNECTION_TEST_PARAMETERS = {
   type: 'object',
   properties: { status: { type: 'string', enum: ['ok'] } },
@@ -90,8 +96,12 @@ class AnthropicModelClient {
   async runTurn(history, message, tools, callTool) {
     const messages = [...history, { role: 'user', content: message }];
     const trace = [];
+    const textParts = [];
+    let textContinuations = 0;
+    let requireTextResponse = false;
+    let toolRounds = 0;
 
-    for (let round = 0; round < this.config.maxToolRounds; round += 1) {
+    for (let round = 0; round < this.config.maxToolRounds + MAX_TEXT_CONTINUATIONS; round += 1) {
       const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/v1/messages'), {
         method: 'POST',
         headers: {
@@ -105,7 +115,7 @@ class AnthropicModelClient {
           temperature: this.config.temperature ?? 0.1,
           system: SYSTEM_PROMPT,
           messages,
-          tools
+          ...(requireTextResponse ? {} : { tools })
         })
       });
       const content = Array.isArray(response.content) ? response.content : [];
@@ -117,9 +127,20 @@ class AnthropicModelClient {
       }));
 
       if (calls.length === 0) {
-        const text = cleanModelText(content.filter(item => item.type === 'text').map(item => item.text).join('\n'));
+        const rawText = content.filter(item => item.type === 'text').map(item => item.text).join('\n');
+        if (rawText) textParts.push(rawText);
+        if (response.stop_reason === 'max_tokens') {
+          if (textContinuations >= MAX_TEXT_CONTINUATIONS) throw new Error('Model answer remained truncated after repeated continuation attempts');
+          messages.push({ role: 'user', content: CONTINUATION_PROMPT });
+          textContinuations += 1;
+          requireTextResponse = true;
+          continue;
+        }
+        const text = cleanModelText(textParts.join(''));
         return { text: text || 'The model returned no text response.', history: messages, trace };
       }
+      if (toolRounds >= this.config.maxToolRounds) throw new Error(`Model exceeded the ${this.config.maxToolRounds}-round tool-call limit`);
+      toolRounds += 1;
 
       const results = await invokeTools(calls, callTool);
       trace.push(...results.map(result => ({ name: result.name, durationMs: result.durationMs, isError: result.isError === true })));
@@ -176,8 +197,12 @@ class OpenAIModelClient {
   async runTurn(history, message, tools, callTool) {
     const messages = [...history, { role: 'user', content: message }];
     const trace = [];
+    const textParts = [];
+    let textContinuations = 0;
+    let requireTextResponse = false;
+    let toolRounds = 0;
 
-    for (let round = 0; round < this.config.maxToolRounds; round += 1) {
+    for (let round = 0; round < this.config.maxToolRounds + MAX_TEXT_CONTINUATIONS; round += 1) {
       const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), {
         method: 'POST',
         headers: {
@@ -188,13 +213,14 @@ class OpenAIModelClient {
           model: this.config.model,
           messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
           tools,
-          tool_choice: 'auto',
+          tool_choice: requireTextResponse ? 'none' : 'auto',
           max_tokens: this.config.maxOutputTokens,
           temperature: this.config.temperature ?? 0.1,
           stream: false
         })
       });
-      const modelMessage = response.choices?.[0]?.message;
+      const choice = response.choices?.[0];
+      const modelMessage = choice?.message;
       if (!modelMessage) throw new Error('Model API response did not contain choices[0].message');
       const assistantMessage = {
         role: 'assistant',
@@ -210,10 +236,30 @@ class OpenAIModelClient {
         arguments: parseArguments(item.function?.arguments)
       }));
       if (calls.length === 0) {
-        const text = cleanModelText(typeof modelMessage.content === 'string' ? modelMessage.content : '');
-        return { text: text || 'The model returned no text response.', history: messages, trace };
+        const rawText = typeof modelMessage.content === 'string' ? modelMessage.content : '';
+        if (rawText) textParts.push(rawText);
+        if (['length', 'max_tokens'].includes(choice.finish_reason)) {
+          if (textContinuations >= MAX_TEXT_CONTINUATIONS) throw new Error('Model answer remained truncated after repeated continuation attempts');
+          messages.push({ role: 'user', content: CONTINUATION_PROMPT });
+          textContinuations += 1;
+          requireTextResponse = true;
+          continue;
+        }
+        const text = cleanModelText(textParts.join(''));
+        if (text) return { text, history: messages, trace };
+        if (trace.length > 0 && !requireTextResponse) {
+          messages.push({
+            role: 'user',
+            content: 'Using the tool results above, provide the final answer now. Explain the important findings clearly and do not call any more tools.'
+          });
+          requireTextResponse = true;
+          continue;
+        }
+        return { text: 'The model returned no text response.', history: messages, trace };
       }
       if (calls.some(call => !call.id || !call.name)) throw new Error('Model returned an incomplete tool call');
+      if (toolRounds >= this.config.maxToolRounds) throw new Error(`Model exceeded the ${this.config.maxToolRounds}-round tool-call limit`);
+      toolRounds += 1;
 
       const results = await invokeTools(calls, callTool);
       trace.push(...results.map(result => ({ name: result.name, durationMs: result.durationMs, isError: result.isError === true })));

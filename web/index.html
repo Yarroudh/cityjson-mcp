@@ -6,7 +6,7 @@
   <meta name="description" content="Datum is a web application for exploring CityJSON datasets through a conversational interface. Import a CityJSON file to ask questions about its contents, or run any connected CityJSON tool.">
   <title>Datum</title>
   <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=10">
+  <link rel="stylesheet" href="/styles.css?v=15">
 </head>
 <body>
   <div class="app" id="app" data-theme="dark">
@@ -63,7 +63,13 @@
     <main class="main">
       <header class="main-header" id="main-header" hidden>
         <div class="main-title"><span class="no" id="conversation-number">#001</span><span id="conversation-title"></span></div>
-        <div class="main-sub" id="model-metadata"></div>
+        <div class="main-header-actions">
+          <div class="main-sub" id="model-metadata"></div>
+          <button class="viewer-open" id="viewer-open" type="button" aria-controls="viewer-panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.3-6 9-6 9 6 9 6-3.3 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+            View model
+          </button>
+        </div>
       </header>
 
       <section class="empty" id="empty-state">
@@ -120,6 +126,43 @@
         </form>
       </section>
     </main>
+
+    <section class="viewer-panel" id="viewer-panel" aria-label="CityJSON model viewer" aria-hidden="true">
+      <header class="viewer-header">
+        <div><span class="viewer-kicker">Current state</span><h2 id="viewer-title">CityJSON viewer</h2></div>
+        <div class="viewer-actions">
+          <label class="viewer-mode-toggle" title="Toggle semantic surface selection">
+            <span>Semantic surface</span>
+            <button class="switch-button" id="viewer-semantics" type="button" role="switch" aria-label="Semantic surface selection" aria-checked="false">
+              <span class="switch-thumb"></span>
+            </button>
+          </label>
+          <button class="viewer-close" id="viewer-close" type="button" title="Collapse viewer" aria-label="Collapse viewer">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="viewer-stage" id="viewer-stage">
+        <div class="viewer-stage-tools">
+          <button class="viewer-tool" id="viewer-fit" type="button" title="Fit model in view" aria-label="Fit model in view">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+        <div class="viewer-loading" id="viewer-loading"><span class="spinner"></span><span>Preparing current model…</span></div>
+        <div class="viewer-empty" id="viewer-empty" hidden></div>
+        <aside class="viewer-inspector" id="viewer-inspector" hidden aria-label="Selected CityJSON object">
+          <header class="viewer-inspector-header">
+            <div><span class="viewer-kicker">Selection</span><h3 id="viewer-selection-title"></h3></div>
+            <button class="viewer-inspector-close" id="viewer-inspector-close" type="button" aria-label="Clear selection">×</button>
+          </header>
+          <div class="viewer-inspector-body" id="viewer-inspector-body"></div>
+        </aside>
+      </div>
+      <footer class="viewer-footer">
+        <span id="viewer-stats">Drag to orbit · scroll to zoom · right-drag to pan</span>
+        <span id="viewer-mode-hint">Object mode · click to select an object</span>
+      </footer>
+    </section>
 
     <div class="drag-overlay" id="drag-overlay" hidden>
       <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 27V9l10-5 10 5v18M3 27h26M11 27v-7h10v7M10 12h3M19 12h3M10 16h3M19 16h3"/></svg>
@@ -181,6 +224,6 @@
       </article>
     </dialog>
   </div>
-  <script type="module" src="/app.js?v=9"></script>
+  <script type="module" src="/app.js?v=18"></script>
 </body>
 </html>

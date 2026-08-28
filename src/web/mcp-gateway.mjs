@@ -13,13 +13,13 @@ function childEnvironment() {
   };
 }
 
-function modelSafeResult(result, maxChars) {
+export function modelSafeResult(result, maxChars) {
   let value;
   if (result.structuredContent !== undefined) {
     const structured = result.structuredContent && typeof result.structuredContent === 'object'
       ? Object.fromEntries(Object.entries(result.structuredContent).filter(([key]) => !key.startsWith('_')))
       : result.structuredContent;
-    value = JSON.stringify(structured);
+    value = JSON.stringify(compactStructuredContent(structured));
   } else {
     value = (result.content || []).map(item => {
       if (item.type === 'text') return item.text;
@@ -35,6 +35,22 @@ function modelSafeResult(result, maxChars) {
   }
   if (value.length > maxChars) return `${value.slice(0, maxChars)}\n…[tool result truncated by chat host]`;
   return value;
+}
+
+function compactStructuredContent(value) {
+  if (Array.isArray(value)) return value.map(compactStructuredContent);
+  if (!value || typeof value !== 'object') return value;
+  if (value.validator === 'val3dity' && value.report && value.reportSummary) {
+    const { report, ...rest } = value;
+    return {
+      ...Object.fromEntries(Object.entries(rest).map(([key, item]) => [key, compactStructuredContent(item)])),
+      report: {
+        omittedFromModelContext: true,
+        reason: 'The repetitive face-level report is stored at reportPath; reportSummary contains every invalid object ID and error-code count.'
+      }
+    };
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, compactStructuredContent(item)]));
 }
 
 function downloadableResources(result) {

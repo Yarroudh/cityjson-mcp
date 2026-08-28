@@ -16,6 +16,10 @@ services:
       - ../src:/app/src:ro
       - ../web:/app/web:ro
       - ../resources:/app/resources:ro
+      # Frontend modules are served by the chat host. Mount Three.js from the
+      # local npm install so UI development does not require rebuilding the
+      # complete backend image whenever this dependency changes.
+      - ../node_modules/three:/app/node_modules/three:ro
       - cityjson-input:/input
       - cityjson-data:/data
 

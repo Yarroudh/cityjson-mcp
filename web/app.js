@@ -63,7 +63,22 @@ const elements = {
   toolDialogDescription: document.querySelector('#tool-dialog-description'),
   toolDialogParameters: document.querySelector('#tool-dialog-parameters'),
   aboutDialog: document.querySelector('#about-dialog'),
-  aboutDialogClose: document.querySelector('#about-dialog-close')
+  aboutDialogClose: document.querySelector('#about-dialog-close'),
+  viewerOpen: document.querySelector('#viewer-open'),
+  viewerPanel: document.querySelector('#viewer-panel'),
+  viewerClose: document.querySelector('#viewer-close'),
+  viewerFit: document.querySelector('#viewer-fit'),
+  viewerSemantics: document.querySelector('#viewer-semantics'),
+  viewerStage: document.querySelector('#viewer-stage'),
+  viewerLoading: document.querySelector('#viewer-loading'),
+  viewerEmpty: document.querySelector('#viewer-empty'),
+  viewerTitle: document.querySelector('#viewer-title'),
+  viewerStats: document.querySelector('#viewer-stats'),
+  viewerModeHint: document.querySelector('#viewer-mode-hint'),
+  viewerInspector: document.querySelector('#viewer-inspector'),
+  viewerInspectorClose: document.querySelector('#viewer-inspector-close'),
+  viewerSelectionTitle: document.querySelector('#viewer-selection-title'),
+  viewerInspectorBody: document.querySelector('#viewer-inspector-body')
 };
 
 const CACHE_KEY = 'datum-state-v1';
@@ -79,6 +94,9 @@ let dragDepth = 0;
 let clientId;
 let pendingSuggestion = null;
 let editingModelId = null;
+let viewer = null;
+let viewerDatasetId = null;
+let viewerRequest = 0;
 
 const MESSAGE_ICONS = {
   copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg>',
@@ -202,6 +220,103 @@ async function requestJson(url, options) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Request failed with ${response.status}`);
   return body;
+}
+
+async function showViewer() {
+  const conversation = activeConversation();
+  if (!conversation?.summary?.datasetId) return;
+  elements.app.classList.add('viewer-visible');
+  elements.viewerPanel.setAttribute('aria-hidden', 'false');
+  elements.viewerOpen.setAttribute('aria-expanded', 'true');
+  elements.viewerTitle.textContent = conversation.name;
+  await loadViewerDataset(conversation);
+}
+
+function hideViewer() {
+  elements.app.classList.remove('viewer-visible');
+  elements.viewerPanel.setAttribute('aria-hidden', 'true');
+  elements.viewerOpen.setAttribute('aria-expanded', 'false');
+}
+
+function inspectorSection(title, entries) {
+  if (!entries.length) return null;
+  const section = document.createElement('section');
+  const heading = document.createElement('h4');
+  heading.textContent = title;
+  const list = document.createElement('dl');
+  for (const [name, value] of entries) {
+    const term = document.createElement('dt');
+    term.textContent = name;
+    const detail = document.createElement('dd');
+    detail.textContent = value == null ? 'null' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+    list.append(term, detail);
+  }
+  section.append(heading, list);
+  return section;
+}
+
+function showViewerSelection(selection) {
+  if (!selection) {
+    elements.viewerInspector.hidden = true;
+    elements.viewerInspectorBody.replaceChildren();
+    return;
+  }
+  elements.viewerSelectionTitle.textContent = selection.id;
+  const objectEntries = [
+    ['Type', selection.object.type],
+    ['Geometry', selection.geometry?.type],
+    ['LoD', selection.geometry?.lod],
+    ['Geometry index', selection.geometryIndex]
+  ].filter(([, value]) => value !== undefined);
+  const semanticEntries = selection.semantic
+    ? [['Type', selection.semantic.type], ['Surface index', selection.semanticIndex], ...Object.entries(selection.semantic).filter(([key]) => key !== 'type')]
+    : [];
+  const attributeEntries = Object.entries(selection.object.attributes || {});
+  const relationshipEntries = [
+    ['Parents', selection.object.parents],
+    ['Children', selection.object.children]
+  ].filter(([, value]) => Array.isArray(value) && value.length);
+  elements.viewerInspectorBody.replaceChildren(...[
+    inspectorSection('Object', objectEntries),
+    inspectorSection('Semantic surface', semanticEntries),
+    inspectorSection('Attributes', attributeEntries.length ? attributeEntries : [['Attributes', 'None']]),
+    inspectorSection('Relationships', relationshipEntries)
+  ].filter(Boolean));
+  elements.viewerInspector.hidden = false;
+}
+
+async function loadViewerDataset(conversation, force = false) {
+  const datasetId = conversation?.summary?.datasetId;
+  if (!datasetId || (!force && viewerDatasetId === datasetId)) return;
+  const requestId = ++viewerRequest;
+  elements.viewerLoading.hidden = false;
+  elements.viewerEmpty.hidden = true;
+  try {
+    const [model, viewerModule] = await Promise.all([
+      requestJson('/api/datasets/view', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ datasetId })
+      }),
+      import('/viewer.js?v=8')
+    ]);
+    if (requestId !== viewerRequest) return;
+    viewer ||= new viewerModule.CityJsonViewer(elements.viewerStage, {
+      onStats: stats => {
+        elements.viewerStats.textContent = `${formatCount(stats.renderedObjects)} objects · ${formatCount(stats.triangles)} triangles · ${formatCount(stats.vertices)} vertices`;
+      },
+      onSelect: showViewerSelection
+    });
+    viewer.setSelectionMode(elements.viewerSemantics.getAttribute('aria-checked') === 'true' ? 'surface' : 'object');
+    viewer.load(model);
+    viewerDatasetId = datasetId;
+  } catch (error) {
+    if (requestId !== viewerRequest) return;
+    elements.viewerEmpty.textContent = `The current model could not be displayed: ${error.message}`;
+    elements.viewerEmpty.hidden = false;
+  } finally {
+    if (requestId === viewerRequest) elements.viewerLoading.hidden = true;
+  }
 }
 
 function createActionButton(label, title, handler) {
@@ -383,10 +498,16 @@ async function retryMessage(conversation, message, messageIndex) {
         clientId,
         message: message.content,
         batchId: message.file ? conversation.batchId : undefined,
+        datasetId: conversation.summary.datasetId,
+        datasetIsDerived: conversation.datasetIsDerived === true,
+        storedFilename: conversation.storedFilename,
+        originalFilename: conversation.originalFilename,
         retryTurn: hadResponse ? retryTurn : undefined
       })
     });
     if (message.file) conversation.batchPending = false;
+    if (result.datasetId) conversation.summary.datasetId = result.datasetId;
+    if (typeof result.datasetIsDerived === 'boolean') conversation.datasetIsDerived = result.datasetIsDerived;
     conversation.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
   } catch (error) {
     conversation.messages.push(...laterMessages);
@@ -549,6 +670,11 @@ function render() {
   renderConversationList();
   renderActiveConversation();
   elements.importButton.disabled = importing;
+  if (!activeConversation()) hideViewer();
+  else if (elements.app.classList.contains('viewer-visible')) {
+    elements.viewerTitle.textContent = activeConversation().name;
+    loadViewerDataset(activeConversation());
+  }
 }
 
 function shortDescription(description) {
@@ -795,6 +921,7 @@ async function importOneFile(file) {
     sizeBytes: imported.sizeBytes,
     importedAt: timestamp(),
     summary: imported.summary,
+    datasetIsDerived: false,
     messages: [{ role: 'assistant', content: welcomeMessage(imported), synthetic: true }]
   };
   conversations = [conversation, ...conversations];
@@ -853,10 +980,16 @@ async function sendMessage() {
         sessionId: active.sessionId,
         clientId,
         message: text,
-        batchId: usedInitialBatch ? active.batchId : undefined
+        batchId: usedInitialBatch ? active.batchId : undefined,
+        datasetId: active.summary.datasetId,
+        datasetIsDerived: active.datasetIsDerived === true,
+        storedFilename: active.storedFilename,
+        originalFilename: active.originalFilename
       })
     });
     active.batchPending = false;
+    if (result.datasetId) active.summary.datasetId = result.datasetId;
+    if (typeof result.datasetIsDerived === 'boolean') active.datasetIsDerived = result.datasetIsDerived;
     active.messages.push({ role: 'assistant', content: result.message, trace: result.trace, downloads: result.downloads });
     saveState();
   } catch (error) {
@@ -883,6 +1016,18 @@ elements.importButton.addEventListener('click', () => elements.fileInput.click()
 elements.dropzone.addEventListener('click', () => elements.fileInput.click());
 elements.fileInput.addEventListener('change', () => importFiles(elements.fileInput.files));
 elements.dismissError.addEventListener('click', hideError);
+elements.viewerOpen.addEventListener('click', showViewer);
+elements.viewerClose.addEventListener('click', hideViewer);
+elements.viewerFit.addEventListener('click', () => viewer?.fit());
+elements.viewerSemantics.addEventListener('click', () => {
+  const enabled = elements.viewerSemantics.getAttribute('aria-checked') !== 'true';
+  elements.viewerSemantics.setAttribute('aria-checked', String(enabled));
+  elements.viewerModeHint.textContent = enabled
+    ? 'Surface mode · click to select a semantic surface'
+    : 'Object mode · click to select an object';
+  viewer?.setSelectionMode(enabled ? 'surface' : 'object');
+});
+elements.viewerInspectorClose.addEventListener('click', () => viewer?.clearSelection());
 
 elements.form.addEventListener('submit', event => {
   event.preventDefault();

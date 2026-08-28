@@ -70,9 +70,13 @@ function publicModelConfig(config) {
   return { provider: config.provider, model: config.model, baseUrl: config.baseUrl };
 }
 
-export async function ensureRequestedDownloads(message, latestDatasetId, resources, gateway) {
+export async function ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId = latestDatasetId) {
   const requested = /\b(download|save (?:it|this|the (?:result|file|dataset)) locally|give me (?:the |a )?file)\b/i.test(message);
   if (!requested || resources.length > 0 || !latestDatasetId) return resources;
+  const derivedDatasetRequested = /\b(subset|filter|reproject|transform|triangulat|clean(?:up)?|merge|convert)\b/i.test(message);
+  if (derivedDatasetRequested && latestDatasetId === sourceDatasetId) {
+    throw new Error('The requested dataset transformation was not completed, so the original file was not offered as the result');
+  }
   const fallback = await gateway.call('cityjson_download', { dataset_id: latestDatasetId });
   if (!fallback.isError) resources.push(...(fallback.downloads || []));
   return resources;
@@ -87,6 +91,12 @@ function attachmentContext(files) {
   return `\n\nThe chat host already imported these attachments through MCP. Use their dataset IDs directly:\n${lines.join('\n')}`;
 }
 
+function activeDatasetContext(datasetId, originalFilename) {
+  if (!datasetId) return '';
+  const filename = originalFilename ? ` (${JSON.stringify(originalFilename)})` : '';
+  return `\n\nActive conversation dataset: dataset_id=${datasetId}${filename}. This is the exact current model for this conversation. Use this dataset ID directly for the user's request. Do not list the inbox, import another file, or ask which dataset they mean.`;
+}
+
 async function staticResponse(requestPath, response) {
   const relative = requestPath === '/' ? 'index.html' : requestPath.slice(1);
   const staticFiles = {
@@ -96,11 +106,18 @@ async function staticResponse(requestPath, response) {
     'styles.css': path.join(publicRoot, 'styles.css'),
     'favicon.svg': path.join(publicRoot, 'favicon.svg'),
     'vendor/marked.esm.js': path.join(projectRoot, 'node_modules/marked/lib/marked.esm.js'),
-    'vendor/purify.es.mjs': path.join(projectRoot, 'node_modules/dompurify/dist/purify.es.mjs')
+    'vendor/purify.es.mjs': path.join(projectRoot, 'node_modules/dompurify/dist/purify.es.mjs'),
+    'vendor/three.module.js': path.join(projectRoot, 'node_modules/three/build/three.module.js'),
+    'vendor/three.core.js': path.join(projectRoot, 'node_modules/three/build/three.core.js'),
+    'vendor/OrbitControls.js': path.join(projectRoot, 'node_modules/three/examples/jsm/controls/OrbitControls.js'),
+    'viewer.js': path.join(publicRoot, 'viewer.js')
   };
   const filename = staticFiles[relative];
   if (!filename) return false;
-  const content = await fs.readFile(filename);
+  let content = await fs.readFile(filename);
+  if (relative === 'vendor/OrbitControls.js') {
+    content = Buffer.from(content.toString('utf8').replace("from 'three';", "from '/vendor/three.module.js';"));
+  }
   const applicationAsset = ['index.html', 'app.js', 'styles.css'].includes(relative);
   response.writeHead(200, {
     'content-type': MIME_TYPES[path.extname(filename)] || 'application/octet-stream',
@@ -340,10 +357,18 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         if (modelConfigurations.has(browserId)) modelConfigurations.get(browserId).updatedAt = Date.now();
         const modelFingerprint = `${selected.config.provider}\u0000${selected.config.model}\u0000${selected.config.baseUrl}`;
         const batch = body.batchId ? uploadBatches.get(body.batchId) : undefined;
-        if (body.batchId && !batch) throw new Error('The attachment batch is unknown or expired; attach the files again');
+        const requestedDatasetId = typeof body.datasetId === 'string' && /^[A-Za-z0-9_.:-]{3,300}$/.test(body.datasetId.trim())
+          ? body.datasetId.trim()
+          : null;
+        const storedFilename = typeof body.storedFilename === 'string' && body.storedFilename === path.basename(body.storedFilename) && body.storedFilename.length <= 255
+          ? body.storedFilename
+          : null;
+        const originalFilename = typeof body.originalFilename === 'string' && body.originalFilename.length <= 255
+          ? body.originalFilename
+          : null;
+        if (body.batchId && !batch && !requestedDatasetId) throw new Error('The attachment batch is unknown or expired; attach the files again');
         const message = typeof body.message === 'string' ? body.message.trim() : '';
         if (!message && !batch?.files.length) throw new Error('Enter a message or attach a CityJSON file');
-        const userMessage = `${message || 'Inspect the attached CityJSON file and summarize it.'}${attachmentContext(batch?.files)}`;
         const storedSession = sessions.get(id);
         const current = storedSession?.modelFingerprint === modelFingerprint
           ? storedSession
@@ -352,20 +377,40 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         let history = current.history || [];
         let turns = current.turns || [];
         let previousDatasetId = current.latestDatasetId;
+        let latestDatasetIsDerived = current.latestDatasetIsDerived ?? body.datasetIsDerived === true;
         if (retryTurn !== null) {
           const checkpoint = turns[retryTurn];
           if (!checkpoint) throw new Error('This question can no longer be retried because its server-side conversation state has expired');
           history = checkpoint.historyBefore;
           previousDatasetId = checkpoint.latestDatasetIdBefore;
+          latestDatasetIsDerived = checkpoint.latestDatasetIsDerivedBefore === true;
           turns = turns.slice(0, retryTurn);
         }
-        let latestDatasetId = batch?.files.at(-1)?.summary?.datasetId || previousDatasetId;
-        const checkpoint = { historyBefore: history, latestDatasetIdBefore: latestDatasetId };
+        let latestDatasetId = batch?.files.at(-1)?.summary?.datasetId || previousDatasetId || requestedDatasetId;
+        if (batch?.files.length) latestDatasetIsDerived = false;
+        if (!batch && !previousDatasetId && latestDatasetId) {
+          const inspection = await gateway.call('cityjson_info', { dataset_id: latestDatasetId });
+          if (inspection.isError) {
+            if (latestDatasetIsDerived) throw new Error('The derived dataset for this conversation expired after the server restarted. Recreate the transformation from the original file.');
+            if (!storedFilename) throw new Error('The active dataset expired and its source filename is unavailable. Import the file again.');
+            const recovered = await gateway.call('cityjson_import', { filename: storedFilename });
+            if (recovered.isError || typeof recovered.structuredContent?.datasetId !== 'string') {
+              throw new Error(`The active conversation file could not be restored: ${recovered.modelContent || 'import failed'}`);
+            }
+            latestDatasetId = recovered.structuredContent.datasetId;
+            latestDatasetIsDerived = false;
+          }
+        }
+        const userMessage = `${message || 'Inspect the attached CityJSON file and summarize it.'}${attachmentContext(batch?.files)}${activeDatasetContext(latestDatasetId, originalFilename)}`;
+        const checkpoint = { historyBefore: history, latestDatasetIdBefore: latestDatasetId, latestDatasetIsDerivedBefore: latestDatasetIsDerived };
+        const sourceDatasetId = latestDatasetId;
         const resources = [];
         const callTool = async (name, args) => {
           const toolResult = await gateway.call(name, args);
           if (!toolResult.isError && typeof toolResult.structuredContent?.datasetId === 'string') {
+            const changedDataset = toolResult.structuredContent.datasetId !== latestDatasetId;
             latestDatasetId = toolResult.structuredContent.datasetId;
+            if (changedDataset) latestDatasetIsDerived = !['cityjson_import', 'cityjson_import_text', 'cityjson_open'].includes(name);
           }
           resources.push(...(toolResult.downloads || []));
           return toolResult;
@@ -376,13 +421,14 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           gateway.modelTools(selected.config.provider),
           callTool
         );
-        await ensureRequestedDownloads(message, latestDatasetId, resources, gateway);
+        await ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId);
         sessions.set(id, {
           history: result.history,
           updatedAt: Date.now(),
           clientId: browserId,
           modelFingerprint,
           latestDatasetId,
+          latestDatasetIsDerived,
           turns: [...turns, checkpoint]
         });
         pruneState();
@@ -390,8 +436,26 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           message: result.text,
           trace: result.trace,
           attachments: batch?.files || [],
-          downloads: registerDownloads(resources)
+          downloads: registerDownloads(resources),
+          datasetId: latestDatasetId,
+          datasetIsDerived: latestDatasetIsDerived
         });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/datasets/view') {
+        const body = await readJson(request, 32 * 1024);
+        const datasetId = typeof body.datasetId === 'string' ? body.datasetId.trim() : '';
+        if (!/^[A-Za-z0-9_.:-]{3,300}$/.test(datasetId)) throw new Error('A valid datasetId is required');
+        const result = await gateway.call('cityjson_download', { dataset_id: datasetId });
+        if (result.isError) throw new Error(result.modelContent || 'The dataset could not be prepared for viewing');
+        const resource = result.downloads?.[0];
+        if (!resource) throw new Error('The dataset did not produce a viewable CityJSON file');
+        const content = resource.path ? await fs.readFile(resource.path, 'utf8') : resource.content;
+        let cityjson;
+        try { cityjson = JSON.parse(content); }
+        catch (error) { throw new Error(`The current dataset is not valid JSON: ${error.message}`); }
+        sendJson(response, 200, cityjson);
         return;
       }
 

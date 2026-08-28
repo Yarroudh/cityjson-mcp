@@ -7,7 +7,8 @@ import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { cleanModelText, createModelClient, SYSTEM_PROMPT } from '../src/web/model-client.mjs';
 import { receiveUploads } from '../src/web/uploads.mjs';
-import { McpGateway } from '../src/web/mcp-gateway.mjs';
+import { McpGateway, modelSafeResult } from '../src/web/mcp-gateway.mjs';
+import { summarizeReport } from '../src/adapters/val3dity.mjs';
 import { getWebConfig } from '../src/web/env.mjs';
 import { configuredModel, createChatApplication, ensureRequestedDownloads } from '../src/web/server.mjs';
 import { followUpSuggestions, inferSuggestionState, initialSuggestions, SUGGESTION_COUNT } from '../web/suggestions.js';
@@ -89,6 +90,37 @@ test('model behavior is low-temperature and suppresses emoji output', () => {
   assert.equal(cleanModelText('Inspection complete. 🏙️'), 'Inspection complete.');
 });
 
+test('val3dity reports keep every invalid object in compact model context', () => {
+  const report = {
+    validity: false,
+    all_errors: [102, 104],
+    dataset_errors: [],
+    features_overview: [{ type: 'Building', total: 2, valid: 0 }],
+    primitives_overview: [{ type: 'MultiSurface', total: 2, valid: 0 }],
+    features: [
+      { id: 'object-1', type: 'Building', validity: false, errors: [
+        { code: 102, description: 'CONSECUTIVE_POINTS_SAME', id: 'face-1' },
+        { code: 102, description: 'CONSECUTIVE_POINTS_SAME', id: 'face-2' }
+      ] },
+      { id: 'object-2', type: 'Building', validity: false, errors: [
+        { code: 104, description: 'RING_SELF_INTERSECTION', id: 'face-3' }
+      ] }
+    ]
+  };
+  const reportSummary = summarizeReport(report);
+  assert.deepEqual(reportSummary.invalidObjectIds, ['object-1', 'object-2']);
+  assert.deepEqual(reportSummary.invalidFeatures[0].errorsByCode, [
+    { code: 102, description: 'CONSECUTIVE_POINTS_SAME', count: 2 }
+  ]);
+  const content = modelSafeResult({ structuredContent: {
+    geometry: { validator: 'val3dity', report, reportSummary }
+  } }, 2_000);
+  assert.doesNotMatch(content, /tool result truncated/);
+  assert.match(content, /"invalidObjectIds":\["object-1","object-2"\]/);
+  assert.match(content, /"omittedFromModelContext":true/);
+  assert.doesNotMatch(content, /face-1/);
+});
+
 test('model connection validation rejects a response without the required tool call', async () => {
   const client = createModelClient({
     provider: 'openai', apiKey: 'test', model: 'text-only-model', baseUrl: 'https://example.test/v1',
@@ -102,8 +134,8 @@ test('HTML versions application assets to prevent cached UI mismatches', async (
     fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8'),
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
-  assert.match(html, /styles\.css\?v=10/);
-  assert.match(html, /app\.js\?v=9/);
+  assert.match(html, /styles\.css\?v=15/);
+  assert.match(html, /app\.js\?v=18/);
   assert.match(html, /favicon\.svg\?v=1/);
   assert.match(app, /messageActionButton\('Retry question', MESSAGE_ICONS\.retry/);
   assert.match(app, /messageActionButton\('Copy message', MESSAGE_ICONS\.copy/);
@@ -200,9 +232,17 @@ test('chat turns prepare a derived dataset when the user asks for a download', a
       };
     }
   };
-  const resources = await ensureRequestedDownloads('Create a Building subset and download it.', 'cj_derived', [], gateway);
+  const resources = await ensureRequestedDownloads('Create a Building subset and download it.', 'cj_derived', [], gateway, 'cj_source');
   assert.deepEqual(calls, [{ name: 'cityjson_download', args: { dataset_id: 'cj_derived' } }]);
   assert.equal(resources[0].filename, 'subset.city.json');
+});
+
+test('download fallback never offers the original file for an uncompleted subset request', async () => {
+  const gateway = { async call() { assert.fail('Original dataset must not be downloaded'); } };
+  await assert.rejects(
+    ensureRequestedDownloads('Get a subset and prepare a file to download.', 'cj_original', [], gateway, 'cj_original'),
+    /transformation was not completed/
+  );
 });
 
 test('retrying a question restores its server-side history checkpoint and discards later turns', async t => {
@@ -256,6 +296,54 @@ test('retrying a question restores its server-side history checkpoint and discar
     { length: 2, message: 'Second question' },
     { length: 0, message: 'First question' },
     { length: 2, message: 'New follow-up' }
+  ]);
+});
+
+test('chat restores and explicitly scopes an expired conversation dataset instead of listing the inbox', async t => {
+  const input = await fs.mkdtemp(path.join(os.tmpdir(), 'datum-dataset-recovery-'));
+  const calls = [];
+  let receivedMessage = '';
+  const model = {
+    async runTurn(history, message) {
+      receivedMessage = message;
+      return { text: 'Subset created.', history: [], trace: [] };
+    }
+  };
+  const gateway = {
+    tools: [],
+    async connect() {},
+    async call(name, args) {
+      calls.push({ name, args });
+      if (name === 'cityjson_backend_status') return {
+        isError: false,
+        structuredContent: { backends: Object.fromEntries(['cjio', 'cjval', 'val3dity', 'citygmlTools', 'cjdb'].map(key => [key, { available: true }])) }
+      };
+      if (name === 'cityjson_info') return { isError: true, modelContent: 'Unknown dataset_id' };
+      if (name === 'cityjson_import') return { isError: false, structuredContent: { datasetId: 'cj_restored' } };
+      throw new Error(`Unexpected tool ${name}`);
+    },
+    async close() {},
+    modelTools() { return []; }
+  };
+  const config = getWebConfig({
+    MODEL_PROVIDER: 'openai', MODEL_NAME: 'test-model', MODEL_API_KEY: 'test-secret', CITYJSON_MCP_INPUT: input
+  });
+  const app = await createChatApplication(config, { gateway, model });
+  t.after(async () => {
+    await app.close();
+    await fs.rm(input, { recursive: true, force: true });
+  });
+  const response = await applicationRequest(app.server, 'POST', '/api/chat', {
+    sessionId: 'recovery-session-123', clientId: 'recovery-client-123', message: 'Get a Building subset.',
+    datasetId: 'cj_expired', storedFilename: 'import-123-model.city.json', originalFilename: 'model.city.json'
+  });
+  assert.equal(response.status, 200);
+  assert.equal(JSON.parse(response.body).datasetId, 'cj_restored');
+  assert.match(receivedMessage, /Active conversation dataset: dataset_id=cj_restored/);
+  assert.match(receivedMessage, /exact current model/);
+  assert.deepEqual(calls.slice(1), [
+    { name: 'cityjson_info', args: { dataset_id: 'cj_expired' } },
+    { name: 'cityjson_import', args: { filename: 'import-123-model.city.json' } }
   ]);
 });
 
@@ -423,6 +511,68 @@ test('OpenAI-compatible model adapter relays function calls and results', async 
   assert.equal(requests[0].body.temperature, 0.1);
   assert.equal(requests[1].body.messages.at(-1).role, 'tool');
   assert.deepEqual(calls, [{ name: 'cityjson_info', args: { dataset_id: 'cj_test' } }]);
+});
+
+test('OpenAI-compatible model adapter recovers when the first post-tool response is empty', async () => {
+  const responses = [
+    { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'cityjson_validate', arguments: '{"dataset_id":"cj_test"}' } }] } }] },
+    { choices: [{ message: { role: 'assistant', content: '', reasoning_content: 'Internal analysis only.' } }] },
+    { choices: [{ message: { role: 'assistant', content: 'Validation found no structural errors.' } }] }
+  ];
+  const requests = [];
+  const client = createModelClient({
+    provider: 'openai', apiKey: 'test', model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com',
+    maxOutputTokens: 100, maxToolRounds: 4, temperature: 0.1
+  }, async (url, options) => {
+    requests.push(JSON.parse(options.body));
+    return jsonResponse(responses.shift());
+  });
+  const result = await client.runTurn([], 'Validate it', [], async () => ({
+    isError: false,
+    modelContent: '{"valid":true,"errors":[]}'
+  }));
+  assert.equal(result.text, 'Validation found no structural errors.');
+  assert.equal(requests[2].tool_choice, 'none');
+  assert.match(requests[2].messages.at(-1).content, /provide the final answer/i);
+  assert.equal(result.trace.length, 1);
+});
+
+test('OpenAI-compatible model adapter continues answers stopped by the output-token limit', async () => {
+  const responses = [
+    { choices: [{ finish_reason: 'length', message: { role: 'assistant', content: 'Affected object: `GML' } }] },
+    { choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ID_123`. The ring is invalid.' } }] }
+  ];
+  const requests = [];
+  const client = createModelClient({
+    provider: 'openai', apiKey: 'test', model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com',
+    maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async (url, options) => {
+    requests.push(JSON.parse(options.body));
+    return jsonResponse(responses.shift());
+  });
+  const result = await client.runTurn([], 'Explain every issue', [], async () => assert.fail('No tool call expected'));
+  assert.equal(result.text, 'Affected object: `GMLID_123`. The ring is invalid.');
+  assert.equal(requests[1].tool_choice, 'none');
+  assert.match(requests[1].messages.at(-1).content, /continue the answer exactly/i);
+});
+
+test('Anthropic model adapter continues answers stopped by the output-token limit', async () => {
+  const responses = [
+    { stop_reason: 'max_tokens', content: [{ type: 'text', text: 'First part ' }] },
+    { stop_reason: 'end_turn', content: [{ type: 'text', text: 'and final part.' }] }
+  ];
+  const requests = [];
+  const client = createModelClient({
+    provider: 'anthropic', apiKey: 'test', model: 'test-model', baseUrl: 'https://example.test',
+    maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async (url, options) => {
+    requests.push(JSON.parse(options.body));
+    return jsonResponse(responses.shift());
+  });
+  const result = await client.runTurn([], 'Explain every issue', [], async () => assert.fail('No tool call expected'));
+  assert.equal(result.text, 'First part and final part.');
+  assert.equal(requests[1].tools, undefined);
+  assert.match(requests[1].messages.at(-1).content, /continue the answer exactly/i);
 });
 
 test('multipart receiver streams JSON files into the inbox', async t => {

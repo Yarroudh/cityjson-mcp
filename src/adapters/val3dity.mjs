@@ -26,11 +26,45 @@ export class Val3dityAdapter {
       exitCode: result.code,
       reportPath,
       report,
+      reportSummary: summarizeReport(report),
       stdout: result.stdout.trim(),
       stderr: result.stderr.trim(),
       durationMs: result.durationMs
     };
   }
+}
+
+export function summarizeReport(report) {
+  if (!report || typeof report !== 'object') return null;
+  const invalidFeatures = (Array.isArray(report.features) ? report.features : [])
+    .filter(feature => feature?.validity === false || (Array.isArray(feature?.errors) && feature.errors.length > 0))
+    .map(feature => {
+      const errors = Array.isArray(feature.errors) ? feature.errors : [];
+      const grouped = new Map();
+      for (const error of errors) {
+        const code = error?.code ?? 'unknown';
+        const current = grouped.get(code) || { code, description: error?.description || '', count: 0 };
+        current.count += 1;
+        grouped.set(code, current);
+      }
+      return {
+        id: feature.id,
+        type: feature.type,
+        errorCount: errors.length,
+        errorCodes: [...grouped.keys()],
+        errorsByCode: [...grouped.values()]
+      };
+    });
+  return {
+    validity: report.validity,
+    allErrorCodes: Array.isArray(report.all_errors) ? report.all_errors : [],
+    datasetErrors: Array.isArray(report.dataset_errors) ? report.dataset_errors : [],
+    invalidFeatureCount: invalidFeatures.length,
+    invalidObjectIds: invalidFeatures.map(feature => feature.id).filter(Boolean),
+    invalidFeatures,
+    featuresOverview: report.features_overview || [],
+    primitivesOverview: report.primitives_overview || []
+  };
 }
 
 function inferValidity(report) {
