@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { parseCityJSON, readCityJSON, summarizeCityJSON } from './cityjson-native.mjs';
@@ -7,6 +8,48 @@ export class DatasetManager {
   constructor(pathPolicy) {
     this.pathPolicy = pathPolicy;
     this.datasets = new Map();
+    this.registryPath = pathPolicy.workspace ? path.join(pathPolicy.workspace, '.datasets.json') : null;
+    this.persistQueue = Promise.resolve();
+    this.loadRegistry();
+  }
+
+  loadRegistry() {
+    if (!this.registryPath || !fsSync.existsSync(this.registryPath)) return;
+    try {
+      const registry = JSON.parse(fsSync.readFileSync(this.registryPath, 'utf8'));
+      for (const dataset of registry.datasets || []) {
+        if (!dataset || !/^cj_[a-f0-9]{12}$/.test(dataset.id) || typeof dataset.path !== 'string') continue;
+        try {
+          const filePath = this.pathPolicy.assertReadable
+            ? this.pathPolicy.assertReadable(dataset.path)
+            : dataset.path;
+          if (!fsSync.statSync(filePath).isFile()) continue;
+          this.datasets.set(dataset.id, { ...dataset, path: filePath });
+        } catch {}
+      }
+    } catch (error) {
+      console.error(`[cityjson-mcp] Could not restore the dataset registry: ${error.message}`);
+    }
+  }
+
+  async persistRegistry() {
+    if (!this.registryPath) return;
+    const content = JSON.stringify({ version: 1, datasets: [...this.datasets.values()] }, null, 2);
+    this.persistQueue = this.persistQueue.catch(() => {}).then(async () => {
+      const temporary = `${this.registryPath}.${process.pid}.${crypto.randomUUID().slice(0, 8)}.tmp`;
+      await fs.writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' });
+      await fs.rename(temporary, this.registryPath);
+    });
+    await this.persistQueue;
+  }
+
+  async remember(dataset) {
+    this.datasets.set(dataset.id, dataset);
+    try { await this.persistRegistry(); }
+    catch (error) {
+      this.datasets.delete(dataset.id);
+      throw error;
+    }
   }
 
   id() { return `cj_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`; }
@@ -16,7 +59,7 @@ export class DatasetManager {
     const json = await readCityJSON(filePath);
     const stat = await fs.stat(filePath);
     const id = this.id();
-    this.datasets.set(id, { id, path: filePath, createdAt: new Date().toISOString(), original: true });
+    await this.remember({ id, path: filePath, createdAt: new Date().toISOString(), original: true });
     return { datasetId: id, path: filePath, sizeBytes: stat.size, ...summarizeCityJSON(json) };
   }
 
@@ -51,7 +94,7 @@ export class DatasetManager {
       const json = await readCityJSON(filePath);
       const stat = await fs.stat(filePath);
       const id = this.id();
-      this.datasets.set(id, {
+      await this.remember({
         id,
         path: filePath,
         filename: safeName,
@@ -76,8 +119,13 @@ export class DatasetManager {
     const filePath = this.pathPolicy.workspacePath(`upload-${crypto.randomUUID().slice(0, 8)}-${suffix}`);
     await fs.writeFile(filePath, content, { encoding: 'utf8', flag: 'wx' });
     const id = this.id();
-    this.datasets.set(id, { id, path: filePath, filename: suffix, createdAt: new Date().toISOString(), original: true, operation: 'upload' });
-    return { datasetId: id, path: filePath, sizeBytes, operation: 'upload', ...summarizeCityJSON(json) };
+    try {
+      await this.remember({ id, path: filePath, filename: suffix, createdAt: new Date().toISOString(), original: true, operation: 'upload' });
+      return { datasetId: id, path: filePath, sizeBytes, operation: 'upload', ...summarizeCityJSON(json) };
+    } catch (error) {
+      await fs.rm(filePath, { force: true });
+      throw error;
+    }
   }
 
   async downloadContent(id, requestedFilename) {
@@ -117,7 +165,7 @@ export class DatasetManager {
     const json = await readCityJSON(resolved);
     const stat = await fs.stat(resolved);
     const id = this.id();
-    this.datasets.set(id, { id, path: resolved, createdAt: new Date().toISOString(), original: false, operation, parents });
+    await this.remember({ id, path: resolved, createdAt: new Date().toISOString(), original: false, operation, parents });
     return { datasetId: id, path: resolved, operation, parentDatasetIds: parents, sizeBytes: stat.size, ...summarizeCityJSON(json) };
   }
 

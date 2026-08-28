@@ -10,7 +10,9 @@ Use concise, professional language. Never use emojis or emoticons.`;
 
 const CONNECTION_TEST_TOOL_NAME = 'datum_connection_test';
 const MAX_TEXT_CONTINUATIONS = 8;
+const MAX_EMPTY_RESPONSE_RETRIES = 2;
 const CONTINUATION_PROMPT = 'Continue the answer exactly from where it was cut off. Do not repeat any heading, sentence, or text already written. Return only the continuation and do not call tools.';
+const FINAL_RESPONSE_PROMPT = 'Provide the final answer now. Explain the important findings clearly and do not call any more tools.';
 const CONNECTION_TEST_PARAMETERS = {
   type: 'object',
   properties: { status: { type: 'string', enum: ['ok'] } },
@@ -323,10 +325,11 @@ class OpenAIModelClient {
     const trace = [];
     const textParts = [];
     let textContinuations = 0;
+    let emptyResponseRetries = 0;
     let requireTextResponse = false;
     let toolRounds = 0;
 
-    for (let round = 0; round < this.config.maxToolRounds + MAX_TEXT_CONTINUATIONS; round += 1) {
+    for (let round = 0; round < this.config.maxToolRounds + MAX_TEXT_CONTINUATIONS + MAX_EMPTY_RESPONSE_RETRIES; round += 1) {
       signal?.throwIfAborted();
       const request = {
         method: 'POST',
@@ -357,7 +360,6 @@ class OpenAIModelClient {
       };
       if (Array.isArray(modelMessage.tool_calls)) assistantMessage.tool_calls = modelMessage.tool_calls;
       if (typeof modelMessage.reasoning_content === 'string') assistantMessage.reasoning_content = modelMessage.reasoning_content;
-      messages.push(assistantMessage);
 
       const calls = (modelMessage.tool_calls || []).map(item => ({
         id: item.id,
@@ -366,8 +368,11 @@ class OpenAIModelClient {
       }));
       if (calls.length === 0) {
         const rawText = typeof modelMessage.content === 'string' ? modelMessage.content : '';
-        if (rawText) textParts.push(rawText);
-        if (['length', 'max_tokens'].includes(choice.finish_reason)) {
+        if (rawText) {
+          messages.push(assistantMessage);
+          textParts.push(rawText);
+        }
+        if (rawText && ['length', 'max_tokens'].includes(choice.finish_reason)) {
           if (textContinuations >= MAX_TEXT_CONTINUATIONS) throw new Error('Model answer remained truncated after repeated continuation attempts');
           messages.push({ role: 'user', content: CONTINUATION_PROMPT });
           textContinuations += 1;
@@ -376,17 +381,21 @@ class OpenAIModelClient {
         }
         const text = cleanModelText(textParts.join(''));
         if (text) return { text, history: messages, trace };
-        if (trace.length > 0 && !requireTextResponse) {
+        if (emptyResponseRetries < MAX_EMPTY_RESPONSE_RETRIES) {
           messages.push({
             role: 'user',
-            content: 'Using the tool results above, provide the final answer now. Explain the important findings clearly and do not call any more tools.'
+            content: trace.length > 0
+              ? `Using the tool results above, ${FINAL_RESPONSE_PROMPT}`
+              : FINAL_RESPONSE_PROMPT
           });
+          emptyResponseRetries += 1;
           requireTextResponse = true;
           continue;
         }
         return { text: 'The model returned no text response.', history: messages, trace };
       }
       if (calls.some(call => !call.id || !call.name)) throw new Error('Model returned an incomplete tool call');
+      messages.push(assistantMessage);
       if (toolRounds >= this.config.maxToolRounds) throw new Error(`Model exceeded the ${this.config.maxToolRounds}-round tool-call limit`);
       toolRounds += 1;
 

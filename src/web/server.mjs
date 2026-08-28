@@ -119,6 +119,31 @@ function activeDatasetContext(datasetId, originalFilename) {
   return `\n\nActive conversation dataset: dataset_id=${datasetId}${filename}. This is the exact current model for this conversation. Use this dataset ID directly for the user's request. Do not list the inbox, import another file, or ask which dataset they mean.`;
 }
 
+function recoveryFilename(value) {
+  return typeof value === 'string' && value === path.basename(value) && value.length <= 255
+    ? value
+    : null;
+}
+
+async function prepareDatasetDownload(gateway, datasetId, body) {
+  let resolvedDatasetId = datasetId;
+  let result = await gateway.call('cityjson_download', { dataset_id: resolvedDatasetId });
+  if (!result.isError) return { datasetId: resolvedDatasetId, result };
+  if (body.datasetIsDerived === true) {
+    throw new Error('This derived dataset is unavailable after the server restart. Recreate the transformation from the original model.');
+  }
+  const storedFilename = recoveryFilename(body.storedFilename);
+  if (!storedFilename) throw new Error(result.modelContent || 'The dataset is unavailable and its source filename is unknown');
+  const recovered = await gateway.call('cityjson_import', { filename: storedFilename });
+  if (recovered.isError || typeof recovered.structuredContent?.datasetId !== 'string') {
+    throw new Error(`The imported model could not be restored: ${recovered.modelContent || 'import failed'}`);
+  }
+  resolvedDatasetId = recovered.structuredContent.datasetId;
+  result = await gateway.call('cityjson_download', { dataset_id: resolvedDatasetId });
+  if (result.isError) throw new Error(result.modelContent || 'The restored dataset could not be prepared');
+  return { datasetId: resolvedDatasetId, result };
+}
+
 async function staticResponse(requestPath, response) {
   const relative = requestPath === '/' ? 'index.html' : requestPath.slice(1);
   const staticFiles = {
@@ -519,15 +544,15 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const body = await readJson(request, 32 * 1024);
         const datasetId = typeof body.datasetId === 'string' ? body.datasetId.trim() : '';
         if (!/^[A-Za-z0-9_.:-]{3,300}$/.test(datasetId)) throw new Error('A valid datasetId is required');
-        const result = await gateway.call('cityjson_download', { dataset_id: datasetId });
-        if (result.isError) throw new Error(result.modelContent || 'The dataset could not be prepared for viewing');
+        const prepared = await prepareDatasetDownload(gateway, datasetId, body);
+        const result = prepared.result;
         const resource = result.downloads?.[0];
         if (!resource) throw new Error('The dataset did not produce a viewable CityJSON file');
         const content = resource.path ? await fs.readFile(resource.path, 'utf8') : resource.content;
         let cityjson;
         try { cityjson = JSON.parse(content); }
         catch (error) { throw new Error(`The current dataset is not valid JSON: ${error.message}`); }
-        sendJson(response, 200, cityjson);
+        sendJson(response, 200, { datasetId: prepared.datasetId, cityjson });
         return;
       }
 
@@ -535,12 +560,12 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const body = await readJson(request, 32 * 1024);
         const datasetId = typeof body.datasetId === 'string' ? body.datasetId.trim() : '';
         if (!/^[A-Za-z0-9_.:-]{3,300}$/.test(datasetId)) throw new Error('A valid datasetId is required');
-        const result = await gateway.call('cityjson_download', { dataset_id: datasetId });
-        if (result.isError) throw new Error(result.modelContent || 'The dataset could not be prepared for download');
+        const prepared = await prepareDatasetDownload(gateway, datasetId, body);
+        const result = prepared.result;
         const downloads = registerDownloads(result.downloads || []);
         if (!downloads.length) throw new Error('The dataset did not produce a downloadable file');
         pruneState();
-        sendJson(response, 200, { downloads });
+        sendJson(response, 200, { datasetId: prepared.datasetId, downloads });
         return;
       }
 

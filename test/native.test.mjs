@@ -91,3 +91,20 @@ test('lists and imports a CityJSON file from the configured inbox by filename', 
   assert.equal(imported.cityObjectCount, 2);
   assert.equal(path.dirname(dm.get(imported.datasetId).path), workspace);
 });
+
+test('restores dataset handles from the persistent workspace registry', async t => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cityjson-registry-test-'));
+  const workspace = path.join(rootDir, 'workspace');
+  await fs.mkdir(workspace);
+  t.after(() => fs.rm(rootDir, { recursive: true, force: true }));
+  const policy = {
+    workspace,
+    workspacePath: name => path.join(workspace, name),
+    assertReadable: value => value
+  };
+  const first = new DatasetManager(policy);
+  const imported = await first.importContent(await fs.readFile(samplePath, 'utf8'), 'persistent.city.json');
+  const second = new DatasetManager(policy);
+  assert.equal(second.get(imported.datasetId).path, imported.path);
+  assert.equal((await second.load(imported.datasetId)).type, 'CityJSON');
+});

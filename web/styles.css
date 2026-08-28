@@ -154,7 +154,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .conversation-name { overflow: hidden; font: 500 12px/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .conversation-divider { margin: 7px 0 6px; border-top: 1px dashed var(--panel-line); }
 .conversation-meta { display: flex; align-items: center; justify-content: space-between; gap: 5px; color: var(--muted); font: 9.5px/1.3 var(--mono); }
-.conversation-meta > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-facts { min-width: 0; display: grid; gap: 2px; }
+.conversation-date { overflow-wrap: anywhere; font-size: 9px; opacity: .8; }
 .conversation-actions { display: flex; flex: 0 0 auto; gap: 5px; opacity: .72; transition: opacity .15s; }
 .conversation-card:hover .conversation-actions, .conversation-card:focus-within .conversation-actions { opacity: 1; }
 .conversation-actions button { width: 27px; height: 27px; display: grid; place-items: center; padding: 0; color: var(--muted); background: var(--panel); border: 1px solid var(--panel-line); border-radius: 4px; font: 16px/1 var(--mono); cursor: pointer; }

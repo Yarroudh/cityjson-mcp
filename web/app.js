@@ -411,15 +411,25 @@ async function loadViewerDataset(conversation, force = false) {
   elements.viewerLoading.hidden = false;
   elements.viewerEmpty.hidden = true;
   try {
-    const [model, viewerModule] = await Promise.all([
+    const [view, viewerModule] = await Promise.all([
       requestJson('/api/datasets/view', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ datasetId })
+        body: JSON.stringify({
+          datasetId,
+          datasetIsDerived: conversation.datasetIsDerived === true,
+          storedFilename: conversation.storedFilename
+        })
       }),
       import('/viewer.js?v=9')
     ]);
     if (requestId !== viewerRequest) return;
+    const model = view.cityjson || view;
+    const resolvedDatasetId = view.datasetId || datasetId;
+    if (resolvedDatasetId !== datasetId) {
+      conversation.summary.datasetId = resolvedDatasetId;
+      saveState();
+    }
     viewer ||= new viewerModule.CityJsonViewer(elements.viewerStage, {
       onStats: stats => {
         elements.viewerStats.textContent = `${formatCount(stats.renderedObjects)} objects · ${formatCount(stats.triangles)} triangles · ${formatCount(stats.vertices)} vertices`;
@@ -428,7 +438,7 @@ async function loadViewerDataset(conversation, force = false) {
     });
     viewer.setSelectionMode(elements.viewerSemantics.getAttribute('aria-checked') === 'true' ? 'surface' : 'object');
     viewer.load(model);
-    viewerDatasetId = datasetId;
+    viewerDatasetId = resolvedDatasetId;
   } catch (error) {
     if (requestId !== viewerRequest) return;
     elements.viewerEmpty.textContent = `The current model could not be displayed: ${error.message}`;
@@ -455,8 +465,16 @@ async function downloadDataset(conversation, event) {
     const result = await requestJson('/api/datasets/download', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ datasetId: conversation.summary.datasetId })
+      body: JSON.stringify({
+        datasetId: conversation.summary.datasetId,
+        datasetIsDerived: conversation.datasetIsDerived === true,
+        storedFilename: conversation.storedFilename
+      })
     });
+    if (result.datasetId && result.datasetId !== conversation.summary.datasetId) {
+      conversation.summary.datasetId = result.datasetId;
+      saveState();
+    }
     const download = result.downloads?.[0];
     if (!download) throw new Error('The dataset did not produce a downloadable file');
     const link = document.createElement('a');
@@ -514,7 +532,13 @@ function renderConversationList() {
     const meta = document.createElement('div');
     meta.className = 'conversation-meta';
     const facts = document.createElement('span');
-    facts.textContent = `${formatCount(conversation.summary.cityObjectCount)} objects · ${conversation.importedAt}`;
+    facts.className = 'conversation-facts';
+    const objectCount = document.createElement('span');
+    objectCount.textContent = `${formatCount(conversation.summary.cityObjectCount)} objects`;
+    const importedAt = document.createElement('span');
+    importedAt.className = 'conversation-date';
+    importedAt.textContent = conversation.importedAt;
+    facts.append(objectCount, importedAt);
     const actions = document.createElement('span');
     actions.className = 'conversation-actions';
     actions.append(

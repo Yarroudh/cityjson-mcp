@@ -144,8 +144,8 @@ test('HTML versions application assets to prevent cached UI mismatches', async (
     fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8'),
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
-  assert.match(html, /styles\.css\?v=16/);
-  assert.match(html, /app\.js\?v=21/);
+  assert.match(html, /styles\.css\?v=17/);
+  assert.match(html, /app\.js\?v=23/);
   assert.match(html, /favicon\.svg\?v=1/);
   assert.match(app, /messageActionButton\('Retry question', MESSAGE_ICONS\.retry/);
   assert.match(app, /messageActionButton\('Copy message', MESSAGE_ICONS\.copy/);
@@ -357,6 +357,43 @@ test('chat restores and explicitly scopes an expired conversation dataset instea
   ]);
 });
 
+test('viewer restores a pre-registry imported dataset after a server restart', async t => {
+  const input = await fs.mkdtemp(path.join(os.tmpdir(), 'datum-viewer-recovery-'));
+  const calls = [];
+  const gateway = {
+    tools: [], async connect() {}, async close() {}, modelTools() { return []; },
+    async call(name, args) {
+      calls.push({ name, args });
+      if (name === 'cityjson_backend_status') return {
+        isError: false,
+        structuredContent: { backends: Object.fromEntries(['cjio', 'cjval', 'val3dity', 'citygmlTools', 'cjdb'].map(key => [key, { available: true }])) }
+      };
+      if (name === 'cityjson_download' && args.dataset_id === 'cj_expired') return { isError: true, modelContent: 'Unknown dataset_id' };
+      if (name === 'cityjson_import') return { isError: false, structuredContent: { datasetId: 'cj_restored' } };
+      if (name === 'cityjson_download' && args.dataset_id === 'cj_restored') return {
+        isError: false,
+        downloads: [{ filename: 'minimal.city.json', mimeType: 'application/json', sizeBytes: 1, path: samplePath }]
+      };
+      throw new Error(`Unexpected tool ${name}`);
+    }
+  };
+  const config = getWebConfig({ MODEL_PROVIDER: 'openai', MODEL_NAME: 'test', MODEL_API_KEY: 'test', CITYJSON_MCP_INPUT: input });
+  const app = await createChatApplication(config, { gateway, model: {} });
+  t.after(async () => { await app.close(); await fs.rm(input, { recursive: true, force: true }); });
+  const response = await applicationRequest(app.server, 'POST', '/api/datasets/view', {
+    datasetId: 'cj_expired', storedFilename: 'stored-model.city.json', datasetIsDerived: false
+  });
+  assert.equal(response.status, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.datasetId, 'cj_restored');
+  assert.equal(body.cityjson.type, 'CityJSON');
+  assert.deepEqual(calls.slice(1), [
+    { name: 'cityjson_download', args: { dataset_id: 'cj_expired' } },
+    { name: 'cityjson_import', args: { filename: 'stored-model.city.json' } },
+    { name: 'cityjson_download', args: { dataset_id: 'cj_restored' } }
+  ]);
+});
+
 test('chat API adds, edits, selects, and deletes model profiles and downloads imported datasets', async t => {
   const input = await fs.mkdtemp(path.join(os.tmpdir(), 'datum-api-test-'));
   const sample = await fs.readFile(samplePath);
@@ -541,6 +578,43 @@ test('OpenAI-compatible model adapter streams text deltas', async () => {
   });
   assert.equal(result.text, 'Validation complete.');
   assert.deepEqual(events.map(event => event.text), ['Validation ', 'complete.']);
+});
+
+test('OpenAI-compatible model adapter does not resend empty reasoning-only assistant messages', async () => {
+  const requests = [];
+  const responses = [
+    sseResponse([
+      { choices: [{ delta: { reasoning_content: 'Internal reasoning without a final answer.' }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      '[DONE]'
+    ]),
+    sseResponse([
+      { choices: [{ delta: { content: 'The selected object has invalid rings.' }, finish_reason: 'stop' }] },
+      '[DONE]'
+    ])
+  ];
+  const client = createModelClient({
+    provider: 'openai', apiKey: 'test', model: 'deepseek-test', baseUrl: 'https://example.test',
+    maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body);
+    if (requests.length === 2) {
+      const invalid = body.messages.find(item => item.role === 'assistant' && !item.content && !item.tool_calls?.length);
+      assert.equal(invalid, undefined);
+      assert.match(body.messages.at(-1).content, /final answer/i);
+    }
+    return responses.shift();
+  });
+  const result = await client.runTurn(
+    [{ role: 'user', content: 'Validate it' }, { role: 'assistant', content: 'Validation complete.' }],
+    'Inspect one invalid object',
+    [],
+    async () => assert.fail('No tool expected'),
+    { onEvent() {} }
+  );
+  assert.equal(result.text, 'The selected object has invalid rings.');
+  assert.equal(requests.length, 2);
 });
 
 test('OpenAI-compatible model adapter assembles streamed tool-call fragments', async () => {
