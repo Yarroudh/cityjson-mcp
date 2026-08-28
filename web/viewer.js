@@ -115,8 +115,10 @@ function objectMesh(id, object, vertices) {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(semanticColors, 3));
   geometry.computeVertexNormals();
-  const color = TYPE_COLORS[object.type] ?? 0xb98b62;
-  const material = new THREE.MeshStandardMaterial({ color, roughness: .78, metalness: .02, side: THREE.DoubleSide });
+  // Vertex colors already contain either the semantic surface color or the
+  // object-type fallback. Keep the base neutral because Three.js multiplies
+  // material.color by vertex colors during shading.
+  const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .78, metalness: .02, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.userData = { id, object, triangleCount, triangleMetadata };
   return mesh;

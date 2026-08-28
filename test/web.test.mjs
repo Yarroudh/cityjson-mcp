@@ -135,7 +135,7 @@ test('HTML versions application assets to prevent cached UI mismatches', async (
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
   assert.match(html, /styles\.css\?v=15/);
-  assert.match(html, /app\.js\?v=18/);
+  assert.match(html, /app\.js\?v=19/);
   assert.match(html, /favicon\.svg\?v=1/);
   assert.match(app, /messageActionButton\('Retry question', MESSAGE_ICONS\.retry/);
   assert.match(app, /messageActionButton\('Copy message', MESSAGE_ICONS\.copy/);

@@ -298,7 +298,7 @@ async function loadViewerDataset(conversation, force = false) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ datasetId })
       }),
-      import('/viewer.js?v=8')
+      import('/viewer.js?v=9')
     ]);
     if (requestId !== viewerRequest) return;
     viewer ||= new viewerModule.CityJsonViewer(elements.viewerStage, {
