@@ -23,11 +23,70 @@ The Docker image includes:
 - `citygml-tools` for CityGML and CityJSON conversion.
 - `cjdb` for PostgreSQL/PostGIS import and export.
 
+<details>
+<summary>Table of Contents</summary>
+
+- [Demo](#demo)
+- [Quick start: Datum chat application](#quick-start-datum-chat-application)
+  - [Requirements](#requirements)
+  - [1. Install the JavaScript dependencies](#1-install-the-javascript-dependencies)
+  - [2. Create `.env`](#2-create-env)
+    - [Free model for testing](#free-model-for-testing)
+    - [Local models with Ollama](#local-models-with-ollama)
+    - [Other model services](#other-model-services)
+  - [3. Start Datum](#3-start-datum)
+    - [Optional: build the image locally](#optional-build-the-image-locally)
+- [Use the MCP server without Datum](#use-the-mcp-server-without-datum)
+  - [Pull and verify the image](#pull-and-verify-the-image)
+  - [Configure a file inbox](#configure-a-file-inbox)
+  - [Claude Desktop](#claude-desktop)
+  - [Claude Code](#claude-code)
+  - [Cursor](#cursor)
+  - [VS Code](#vs-code)
+  - [Other MCP clients](#other-mcp-clients)
+- [File and dataset handling](#file-and-dataset-handling)
+- [Tool catalog](#tool-catalog)
+  - [Dataset management and inspection](#dataset-management-and-inspection)
+  - [Validation](#validation)
+  - [Transformations](#transformations)
+  - [Export, conversion, and database](#export-conversion-and-database)
+  - [Specification and schemas](#specification-and-schemas)
+- [Example prompts](#example-prompts)
+  - [Inspect a file](#inspect-a-file)
+  - [Validate a file](#validate-a-file)
+  - [Create a subset](#create-a-subset)
+  - [Clean and download](#clean-and-download)
+- [Configuration reference](#configuration-reference)
+- [Run without Docker (not recommended)](#run-without-docker-not-recommended)
+  - [Install Ollama manually](#install-ollama-manually)
+- [Security](#security)
+- [Contributing](#contributing)
+- [Next](#next)
+- [Tests](#tests)
+- [Known limitations](#known-limitations)
+- [Issues and Feedback](#issues-and-feedback)
+- [Upstream Projects](#upstream-projects)
+  - [CityJSON](#cityjson)
+  - [CityJSON Tools](#cityjson-tools)
+  - [Model Context Protocol](#model-context-protocol)
+- [Citation](#citation)
+  - [APA](#apa)
+  - [IEEE](#ieee)
+  - [BibTeX](#bibtex)
+- [License](#license)
+- [About Developer](#about-developer)
+
+</details>
+
+---
+
 ## Demo
 
 The following video is a demo of Datum, the chat application in this repository. It shows importing a CityJSON file, inspecting it, creating a subset, and downloading the derived dataset.
 
 [![Datum demo](https://img.youtube.com/vi/Pq2LojuAm-4/maxresdefault.jpg)](https://www.youtube.com/watch?v=Pq2LojuAm-4)
+
+---
 
 ## Quick start: Datum chat application
 
@@ -78,7 +137,7 @@ The model settings mean:
 
 The `.env` model is the default model in Datum. Users can add other models from the model menu in the UI. Models added through the interface remain in server memory for up to eight hours. Their API keys are not returned to the browser or passed to MCP tools.
 
-### Free model for testing
+#### Free model for testing
 
 Gemini 3.7 Flash is the recommended model for initial testing. Google lists free input and output tokens for this model on the Gemini API free tier. The free tier has rate limits, availability depends on region, and Google states that free-tier content may be used to improve its products. Do not send confidential datasets through a free-tier account without reviewing the provider's data terms.
 
@@ -104,7 +163,7 @@ The base URL above is Google's documented [OpenAI compatibility endpoint](https:
 
 Check the [Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricing) and [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits) because free-tier quotas can change.
 
-### Local models with Ollama
+#### Local models with Ollama
 
 No separate Ollama installation is required for the Docker quick start. `npm run chat` automatically downloads the official Ollama image when needed, starts it beside Datum, and keeps downloaded models in a persistent Docker volume. 
 
@@ -135,7 +194,7 @@ Local model quality and memory requirements vary. Datum evaluates a model's meta
 
 The default `16384` tokens context is a practical balance. Use `8192` if you have memory constraints or `32768` for longer conversations when sufficient memory is available. For bundled Docker Ollama, change `OLLAMA_CONTEXT_LENGTH` in `.env` and restart Datum. For native Ollama, set the same variable when launching Ollama and restart that service. Ollama applies this globally because its API endpoint does not accept the context size per request.
 
-### Other model services
+#### Other model services
 
 Datum can use any model that supports `tool calls` through one of its two API formats. Examples:
 
@@ -193,6 +252,8 @@ npm run chat
 The `val3dity` and `cjval` build stages take the most time. They can be cached separately.
 
 Set `CITYJSON_MCP_IMAGE` to use your created Docker image.
+
+---
 
 ## Use the MCP server without Datum
 
@@ -287,6 +348,8 @@ docker run --rm -i yarroudh/cityjson-mcp:latest
 
 Add the `/input` mount shown above when the server must read local files.
 
+---
+
 ## File and dataset handling
 
 - Datum streams browser attachments to the MCP input directory and calls `cityjson_import` automatically.
@@ -297,6 +360,8 @@ Add the `/input` mount shown above when the server must read local files.
 - `cityjson_download` returns a source or derived dataset.
 - Dataset handles remain valid only while the MCP server process is running.
 - Derived files remain in the managed workspace until they are deleted externally.
+
+---
 
 ## Tool catalog
 
@@ -366,6 +431,8 @@ Each tool in this table returns a new dataset handle.
 | `cityjson_extensions_registry` | CityJSON registry | List or search registered extensions. |
 | `cityjson_extension_schema` | CityJSON registry | Read a registered extension schema. |
 
+---
+
 ## Example prompts
 
 ### Inspect a file
@@ -391,6 +458,10 @@ Expected tools: `cityjson_import`, `cityjson_subset`, `cityjson_filter_lod`, `ci
 > Import `model.city.json`. Remove duplicate and unused vertices, validate the derived dataset, and return it as `tile-clean.city.json`. Do not overwrite the source.
 
 Expected tools: `cityjson_import`, `cityjson_clean_vertices`, `cityjson_validate`, `cityjson_download`.
+
+> In Datum, you can ignore the first instruction, **Import `<filename>`**, since file attachments are handled automatically. There is no need to manually place your models in the `input/` folder. You can import a CityJSON file directly using the **Import CityJSON** button or by dragging and dropping the file.
+
+---
 
 ## Configuration reference
 
@@ -420,7 +491,9 @@ Expected tools: `cityjson_import`, `cityjson_clean_vertices`, `cityjson_validate
 
 Set `PGPASSWORD` in the process environment for cjdb. Database tool arguments do not accept a password.
 
-## Run without Docker
+---
+
+## Run without Docker (not recommended)
 
 Running without Docker requires Node.js and the backend executables used by the requested tools.
 
@@ -475,6 +548,8 @@ Backend installation sources:
 
 Use `npm run chat:host` only when all required backends are installed locally. Datum checks backend availability during startup. `CHAT_ALLOW_PARTIAL_BACKENDS=true` allows startup with missing backends for development tests.
 
+---
+
 ## Security
 
 - File operations are limited to `CITYJSON_MCP_ALLOWED_ROOTS`, the input directory, and the managed workspace.
@@ -486,6 +561,8 @@ Use `npm run chat:host` only when all required backends are installed locally. D
 - cjdb export accepts only a single `SELECT` statement, but this check is not a database security boundary. Use a database role with limited permissions.
 - Commands have time and output limits.
 - Treat installation of any local MCP server as installation of local code.
+
+---
 
 ## Contributing
 
@@ -506,12 +583,16 @@ Use `npm run chat:host` only when all required backends are installed locally. D
 
 Do not include API keys, database passwords, private CityJSON datasets, generated workspaces, or `.env` files in a contribution.
 
+---
+
 ## Next
 
 - [x] Add explicit Ollama setup and model presets for local models.
 - [x] Stream model responses and tool progress to the browser.
 - [x] Add cancellation and progress reporting for long validation and conversion jobs.
 - [x] Add an optional 3D preview for imported and derived datasets.
+
+---
 
 ## Tests
 
@@ -533,6 +614,8 @@ Verify every executable in the Docker image:
 npm run docker:doctor
 ```
 
+---
+
 ## Known limitations
 
 - Dataset handles are scoped to the current process. If the MCP server restarts, any existing `dataset_id` values become invalid and must be recreated.
@@ -543,17 +626,49 @@ npm run docker:doctor
 - Exact export and conversion behavior depends on the installed backend versions.
 - `val3dity` is GPL-3.0 software and runs as a separate executable. Review upstream licenses before redistributing a modified image.
 
-## Upstream projects
+---
 
-- [CityJSON specification](https://www.cityjson.org/specs/)
-- [CityJSON specification repository](https://github.com/cityjson/specs)
-- [CityJSON Extensions registry](https://github.com/cityjson/extensions)
-- [cjio](https://github.com/cityjson/cjio)
-- [cjval](https://github.com/cityjson/cjval)
-- [val3dity](https://github.com/tudelft3d/val3dity)
-- [citygml-tools](https://github.com/citygml4j/citygml-tools)
-- [cjdb](https://github.com/cityjson/cjdb)
-- [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+## Issues and Feedback
+
+If you encounter a bug, unexpected behavior, or have a suggestion for improvement, please open an issue in the repository.
+
+When reporting an issue, include as much relevant information as possible, such as:
+
+- A clear description of the problem
+- Steps to reproduce the issue
+- Expected and actual behavior
+- Relevant logs or error messages
+- Your environment and configuration, when applicable
+
+Feature requests and other constructive feedback are also welcome. Before opening a new issue, please check the existing issues to avoid duplicates.
+
+---
+
+## Upstream Projects
+
+This project builds on and integrates with several projects and specifications from the CityJSON, 3D city modelling, and Model Context Protocol ecosystems.
+
+### CityJSON
+
+- [CityJSON specification](https://www.cityjson.org/specs/) — Official CityJSON specification and documentation.
+- [CityJSON specification repository](https://github.com/cityjson/specs) — Source repository for the CityJSON specification.
+- [CityJSON Extensions registry](https://github.com/cityjson/extensions) — Registry of CityJSON extensions maintained by the community.
+
+### CityJSON Tools
+
+- [cjio](https://github.com/cityjson/cjio) — Command line tools and Python utilities for working with CityJSON.
+- [cjval](https://github.com/cityjson/cjval) — Validation tools for CityJSON datasets.
+- [cjdb](https://github.com/cityjson/cjdb) — Database tools for storing and querying CityJSON data.
+- [val3dity](https://github.com/tudelft3d/val3dity) — Validation of 3D geometries and 3D city models.
+- [citygml-tools](https://github.com/citygml4j/citygml-tools) — Command line tools for processing and converting CityGML datasets.
+
+### Model Context Protocol
+
+- [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) — TypeScript SDK for implementing Model Context Protocol servers and clients.
+
+> These projects are developed and maintained independently by their respective authors and communities. Please refer to their repositories for documentation, licensing, and support.
+
+---
 
 ## Citation
 
@@ -581,11 +696,15 @@ We are committed to supporting open and reproducible research and welcome the us
 }
 ```
 
+---
+
 ## License
 
 This repository uses the MIT License. See [LICENSE](LICENSE).
 
 The bundled image invokes external programs under their own licenses. This repository does not relicense those programs.
+
+---
 
 ## About Developer
 
