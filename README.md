@@ -37,7 +37,9 @@ Datum is the official AI client provided with CityJSON MCP toolbox. It accepts C
 
 - Docker Desktop or Docker Engine with Docker Compose.
 - Node.js 20 or newer.
-- An API key for a model that supports tool calls.
+- (optional) An API key for a model that supports tool calls.
+
+> Datum supports Ollama OpenAI-compatible models. However, we recommend using a cloud model for better performance. Local models could struggle from memory limitations and are not fully tested.
 
 ### 1. Install the JavaScript dependencies
 
