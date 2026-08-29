@@ -591,6 +591,6 @@ The bundled image invokes external programs under their own licenses. This repos
 
 This project is developed and maintained by **Anass Yarroudh**, a Data Scientist and Machine Learning Engineer at **GIM**, and a Research Associate at the **University of Liège**.
 
-This repository is a personal side project developed independently. It is **not affiliated with, endorsed by, or maintained on behalf of GIM or the University of Liège**.
+This repository is a personal side project developed independently and is not affiliated with, endorsed by, or maintained on behalf of any of my professional or academic affiliations.
 
 For professional inquiries or to connect, feel free to reach out on [LinkedIn](https://www.linkedin.com/in/anass-yarroudh/).
