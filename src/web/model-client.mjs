@@ -305,7 +305,32 @@ class OpenAIModelClient {
       if (!response.capabilities?.includes('tools')) {
         throw new Error('The selected Ollama model does not advertise tool-calling support');
       }
-      return;
+      try {
+        const probe = await fetchJson(this.fetch, ollamaApiUrl(this.config.baseUrl, '/api/chat'), {
+          method: 'POST',
+          signal: AbortSignal.timeout(60_000),
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: this.config.model,
+            messages: [{ role: 'user', content: 'Inspect dataset cj_test. Call cityjson_info with dataset_id set to cj_test.' }],
+            tools: [{ type: 'function', function: {
+              name: 'cityjson_info',
+              description: 'Inspect a CityJSON dataset.',
+              parameters: { type: 'object', properties: { dataset_id: { type: 'string' } }, required: ['dataset_id'], additionalProperties: false }
+            } }],
+            think: false,
+            stream: false,
+            options: { num_predict: 128, temperature: 0 }
+          })
+        });
+        const passed = probe.message?.tool_calls?.some(call => call.function?.name === 'cityjson_info'
+          && call.function?.arguments?.dataset_id === 'cj_test');
+        return passed
+          ? { rating: 'recommended', detail: 'Passed Datum tool-call evaluation' }
+          : { rating: 'limited', detail: 'Supports tools but did not pass the Datum tool-call evaluation' };
+      } catch {
+        return { rating: 'limited', detail: 'Supports tools but the Datum tool-call evaluation did not complete' };
+      }
     }
     const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), {
       method: 'POST',
@@ -334,6 +359,7 @@ class OpenAIModelClient {
     const calls = response.choices?.[0]?.message?.tool_calls;
     const accepted = calls?.some(item => item.type === 'function' && item.function?.name === CONNECTION_TEST_TOOL_NAME);
     if (!accepted) throw new Error('The model responded, but it did not complete the required tool-call test');
+    return { rating: 'recommended', detail: 'Passed Datum tool-call evaluation' };
   }
 
   async runTurn(history, message, tools, callTool, { signal, onEvent } = {}) {

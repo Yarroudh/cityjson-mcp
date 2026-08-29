@@ -61,6 +61,8 @@ const elements = {
   pullModelOpen: document.querySelector('#pull-model-open'),
   modelApiKey: document.querySelector('#model-api-key'),
   modelBaseUrl: document.querySelector('#model-base-url'),
+  ollamaContextNote: document.querySelector('#ollama-context-note'),
+  ollamaContextLength: document.querySelector('#ollama-context-length'),
   ollamaPullDialog: document.querySelector('#ollama-pull-dialog'),
   ollamaPullForm: document.querySelector('#ollama-pull-form'),
   ollamaPullClose: document.querySelector('#ollama-pull-close'),
@@ -72,6 +74,13 @@ const elements = {
   ollamaPullProgress: document.querySelector('#ollama-pull-progress'),
   ollamaPullError: document.querySelector('#ollama-pull-error'),
   ollamaPullSubmitLabel: document.querySelector('#ollama-pull-submit-label'),
+  modelDeleteDialog: document.querySelector('#model-delete-dialog'),
+  modelDeleteForm: document.querySelector('#model-delete-form'),
+  modelDeleteClose: document.querySelector('#model-delete-close'),
+  modelDeleteCancel: document.querySelector('#model-delete-cancel'),
+  modelDeleteName: document.querySelector('#model-delete-name'),
+  modelDeleteError: document.querySelector('#model-delete-error'),
+  modelDeleteSubmitLabel: document.querySelector('#model-delete-submit-label'),
   toolDialog: document.querySelector('#tool-dialog'),
   toolDialogClose: document.querySelector('#tool-dialog-close'),
   toolDialogName: document.querySelector('#tool-dialog-name'),
@@ -114,6 +123,8 @@ let clientId;
 let pendingSuggestion = null;
 let editingModelId = null;
 let ollamaModelNames = [];
+let pendingDeleteModel = null;
+let pullController = null;
 let viewer = null;
 let viewerDatasetId = null;
 let viewerRequest = 0;
@@ -954,6 +965,8 @@ function openModelDialog(model = null) {
     : elements.modelProvider.value === 'ollama' ? (runtimeConfig?.ollamaBaseUrl || 'http://127.0.0.1:11434/v1') : 'https://api.openai.com/v1');
   elements.discoverModels.hidden = elements.modelProvider.value !== 'ollama';
   elements.pullModelOpen.hidden = elements.modelProvider.value !== 'ollama';
+  elements.ollamaContextNote.hidden = elements.modelProvider.value !== 'ollama';
+  elements.ollamaContextLength.textContent = `${Math.round((runtimeConfig?.ollamaContextLength || 16384) / 1024)}K tokens`;
   elements.modelDialog.showModal();
   if (elements.modelProvider.value === 'ollama') void discoverOllamaModels();
 }
@@ -1039,7 +1052,10 @@ function createModelOption(model) {
   name.textContent = model.model;
   const meta = document.createElement('span');
   meta.className = 'model-option-meta';
-  meta.textContent = `${model.provider} API${model.isDefault ? ' · default' : ''} · ${model.baseUrl}`;
+  const compatibilityRating = model.compatibility?.rating === 'recommended' ? 'Recommended' : model.compatibility?.rating === 'limited' ? 'Limited' : '';
+  const compatibility = compatibilityRating ? ` · ${compatibilityRating}` : '';
+  meta.textContent = `${model.provider} API${model.isDefault ? ' · default' : ''}${compatibility} · ${model.baseUrl}`;
+  if (model.compatibility?.detail) meta.title = model.compatibility.detail;
   copy.append(name, meta);
   if (model.id === runtimeConfig.activeModelId) {
     const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1111,8 +1127,18 @@ async function selectModel(modelId) {
 
 async function deleteModel(model) {
   closeMenus();
-  if (!window.confirm(`Delete the model configuration for ${model.model}?`)) return;
-  hideError();
+  pendingDeleteModel = model;
+  elements.modelDeleteName.textContent = model.model;
+  elements.modelDeleteError.hidden = true;
+  elements.modelDeleteDialog.showModal();
+}
+
+async function confirmDeleteModel() {
+  if (!pendingDeleteModel) return;
+  const model = pendingDeleteModel;
+  const submit = elements.modelDeleteForm.querySelector('[type="submit"]');
+  submit.disabled = true;
+  elements.modelDeleteSubmitLabel.textContent = 'Deleting';
   try {
     const selected = await requestJson(`/api/models/${encodeURIComponent(model.id)}`, {
       method: 'DELETE',
@@ -1120,8 +1146,14 @@ async function deleteModel(model) {
       body: JSON.stringify({ clientId })
     });
     configureRuntime({ ...runtimeConfig, ...selected });
+    pendingDeleteModel = null;
+    elements.modelDeleteDialog.close();
   } catch (error) {
-    showError(`Model deletion failed: ${error.message}`);
+    elements.modelDeleteError.textContent = `Model deletion failed: ${error.message}`;
+    elements.modelDeleteError.hidden = false;
+  } finally {
+    submit.disabled = false;
+    elements.modelDeleteSubmitLabel.textContent = 'Delete model';
   }
 }
 
@@ -1339,11 +1371,26 @@ elements.modelDialog.addEventListener('close', () => {
   elements.modelApiKey.value = '';
 });
 elements.ollamaPullClose.addEventListener('click', () => elements.ollamaPullDialog.close());
-elements.ollamaPullCancel.addEventListener('click', () => elements.ollamaPullDialog.close());
+elements.ollamaPullCancel.addEventListener('click', () => {
+  if (pullController) {
+    elements.ollamaPullStatusText.textContent = 'Cancelling download';
+    elements.ollamaPullCancel.disabled = true;
+    pullController.abort();
+  } else {
+    elements.ollamaPullDialog.close();
+  }
+});
+elements.modelDeleteClose.addEventListener('click', () => elements.modelDeleteDialog.close());
+elements.modelDeleteCancel.addEventListener('click', () => elements.modelDeleteDialog.close());
+elements.modelDeleteDialog.addEventListener('close', () => { pendingDeleteModel = null; });
+elements.modelDeleteForm.addEventListener('submit', event => {
+  event.preventDefault();
+  void confirmDeleteModel();
+});
 elements.toolDialogClose.addEventListener('click', () => elements.toolDialog.close());
 elements.aboutButton.addEventListener('click', () => elements.aboutDialog.showModal());
 elements.aboutDialogClose.addEventListener('click', () => elements.aboutDialog.close());
-for (const dialog of [elements.modelDialog, elements.ollamaPullDialog, elements.toolDialog, elements.aboutDialog]) {
+for (const dialog of [elements.modelDialog, elements.ollamaPullDialog, elements.modelDeleteDialog, elements.toolDialog, elements.aboutDialog]) {
   dialog.addEventListener('click', event => {
     if (event.target === dialog) dialog.close();
   });
@@ -1360,6 +1407,7 @@ elements.modelProvider.addEventListener('change', () => {
   elements.modelApiKey.placeholder = isOllama ? 'Not required for local Ollama' : (editingModelId ? 'Leave blank to keep the current key' : 'Enter the API key');
   elements.discoverModels.hidden = !isOllama;
   elements.pullModelOpen.hidden = !isOllama;
+  elements.ollamaContextNote.hidden = !isOllama;
   if (isOllama) void discoverOllamaModels();
   else closeOllamaModelOptions();
 });
@@ -1393,8 +1441,10 @@ elements.ollamaPullForm.addEventListener('submit', async event => {
   event.preventDefault();
   const model = elements.ollamaPullName.value.trim();
   const submit = elements.ollamaPullForm.querySelector('[type="submit"]');
+  pullController = new AbortController();
   submit.disabled = true;
-  elements.ollamaPullCancel.disabled = true;
+  elements.ollamaPullCancel.disabled = false;
+  elements.ollamaPullCancel.textContent = 'Cancel download';
   elements.ollamaPullClose.disabled = true;
   elements.ollamaPullSubmitLabel.textContent = 'Pulling model';
   elements.ollamaPullStatusText.textContent = `Preparing ${model}`;
@@ -1403,8 +1453,9 @@ elements.ollamaPullForm.addEventListener('submit', async event => {
   elements.ollamaPullStatus.hidden = false;
   elements.ollamaPullError.hidden = true;
   try {
-    await requestEventStream('/api/models/pull', {
+    const pullResult = await requestEventStream('/api/models/pull', {
       method: 'POST',
+      signal: pullController.signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, baseUrl: elements.modelBaseUrl.value })
     }, pullEvent => {
@@ -1415,15 +1466,24 @@ elements.ollamaPullForm.addEventListener('submit', async event => {
       elements.ollamaPullPercent.textContent = `${percent}%`;
       elements.ollamaPullStatusText.textContent = pullEvent.status || `Downloading ${model}`;
     });
+    if (pullResult.type === 'cancelled') {
+      elements.ollamaPullDialog.close();
+      return;
+    }
     elements.modelName.value = model;
     elements.ollamaPullDialog.close();
     await discoverOllamaModels();
   } catch (error) {
-    elements.ollamaPullError.textContent = `Could not pull ${model}: ${error.message}`;
-    elements.ollamaPullError.hidden = false;
+    if (error.name === 'AbortError') elements.ollamaPullDialog.close();
+    else {
+      elements.ollamaPullError.textContent = `Could not pull ${model}: ${error.message}`;
+      elements.ollamaPullError.hidden = false;
+    }
   } finally {
+    pullController = null;
     submit.disabled = false;
     elements.ollamaPullCancel.disabled = false;
+    elements.ollamaPullCancel.textContent = 'Cancel';
     elements.ollamaPullClose.disabled = false;
     elements.ollamaPullSubmitLabel.textContent = 'Pull model';
   }

@@ -72,6 +72,7 @@ The model settings mean:
 | `MODEL_API_KEY` | except Ollama | API credential issued by the model provider. Local Ollama needs no key. Do not commit `.env`. |
 | `MODEL_BASE_URL` | yes | Base URL for the provider API. |
 | `MODEL_TEMPERATURE` | no | Sampling temperature. Datum defaults to `0.1`. |
+| `OLLAMA_CONTEXT_LENGTH` | no | Ollama context window in tokens. Defaults to `16384`; larger values use more RAM or VRAM. |
 
 The `.env` model is the default model in Datum. Users can add other models from the model menu. Models added through the interface remain in server memory for up to eight hours. Their API keys are not returned to the browser or passed to MCP tools.
 
@@ -103,7 +104,7 @@ Check the [Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricin
 
 ### Local models with Ollama
 
-No separate Ollama installation is required for the Docker quick start. `npm run chat` automatically downloads the official Ollama image when needed, starts it beside Datum, and keeps downloaded models in a persistent Docker volume.
+No separate Ollama installation is required for the Docker quick start. `npm run chat` automatically downloads the official Ollama image when needed, starts it beside Datum, and keeps downloaded models in a persistent Docker volume. On macOS, it first looks for Ollama running natively at `127.0.0.1:11434` and uses it when available so models can use Apple Metal acceleration; otherwise it falls back to the bundled Docker service.
 
 To make an Ollama model the default, configure `.env`:
 
@@ -113,11 +114,14 @@ MODEL_NAME=qwen3:8b
 MODEL_API_KEY=
 MODEL_BASE_URL=http://ollama:11434/v1
 MODEL_TEMPERATURE=0.1
+OLLAMA_CONTEXT_LENGTH=16384
 ```
 
-You can also select Ollama in Datum, pull a suggested model with the add button, or refresh the custom model list. `npm run chat:stop` stops both containers without deleting downloaded models.
+You can also select Ollama in Datum, pull a suggested model with the add button, cancel a pull in progress, or refresh the custom model list. `npm run chat:stop` stops both containers without deleting downloaded models. Deleting a model from Datum removes only its saved configuration; it does not remove the downloaded model from Ollama.
 
-Local model quality and memory requirements vary. Datum validates new configurations with a tool-call test, but larger CityJSON workflows still require a model that can reliably select tools and produce valid arguments.
+Local model quality and memory requirements vary. Datum evaluates a model's metadata and actual tool-call output, then marks it **Recommended** or **Limited** in the model menu. Limited models remain usable, but may be less reliable for CityJSON workflows.
+
+The default `16384`-token context is a practical balance. Use `8192` on memory-constrained machines or `32768` for longer conversations when sufficient memory is available. For bundled Docker Ollama, change `OLLAMA_CONTEXT_LENGTH` in `.env` and restart Datum. For native Ollama, set the same variable when launching Ollama and restart that service. Ollama applies this globally because its OpenAI-compatible endpoint does not accept the context size per request.
 
 ### Other model services
 
@@ -155,10 +159,10 @@ npm run chat:stop
 
 `npm run chat` uses this image-selection sequence:
 
-1. Check whether the CityJSON MCP and official Ollama images exist locally.
-2. Pull either missing image from its registry.
-3. Start Ollama and wait for it to become healthy.
-4. Start the chat application in detached mode without building an image.
+1. On macOS, use a running native Ollama service when one is detected.
+2. Otherwise, check whether the official Ollama image exists and pull it when missing.
+3. Check whether the CityJSON MCP image exists and pull it when missing.
+4. Start the selected Ollama service and the chat application in detached mode without building an image.
 
 The application binds to `127.0.0.1:3000`. Docker volumes store imported files, derived datasets, and downloaded Ollama models. Ollama is available only to the internal Compose network and is not published on a host port.
 
@@ -448,6 +452,7 @@ MODEL_NAME=qwen3:8b
 MODEL_API_KEY=
 MODEL_BASE_URL=http://127.0.0.1:11434/v1
 OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+OLLAMA_CONTEXT_LENGTH=16384
 ```
 
 Then start Datum with `npm run chat:host`. Native Ollama is recommended on macOS when model performance matters because it can use Apple Metal acceleration; the Docker Desktop container cannot use the Mac GPU.

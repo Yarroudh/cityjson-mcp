@@ -6,7 +6,7 @@
   <meta name="description" content="Datum is a web application for exploring CityJSON datasets through a conversational interface. Import a CityJSON file to ask questions about its contents, or run any connected CityJSON tool.">
   <title>Datum</title>
   <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=20">
+  <link rel="stylesheet" href="/styles.css?v=22">
 </head>
 <body>
   <div class="app" id="app" data-theme="dark">
@@ -190,6 +190,7 @@
         <div class="field"><label for="model-name">Model name</label><div class="model-name-picker"><input id="model-name" type="text" maxlength="200" autocomplete="off" required placeholder="e.g. qwen3:8b" role="combobox" aria-autocomplete="list" aria-controls="ollama-model-options" aria-expanded="false"><div class="model-name-actions"><button class="model-field-action" id="discover-models" type="button" title="Refresh installed Ollama models" aria-label="Refresh installed Ollama models"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.5 10A7 7 0 0 0 6 7.5L4 11M5.5 14A7 7 0 0 0 18 16.5l2-3.5"/></svg></button><button class="model-field-action" id="pull-model-open" type="button" title="Pull a new Ollama model" aria-label="Pull a new Ollama model"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div><div class="model-name-options" id="ollama-model-options" role="listbox" hidden></div></div></div>
         <label class="field"><span>API key</span><input id="model-api-key" type="password" maxlength="10000" autocomplete="new-password" required placeholder="Enter the API key"></label>
         <label class="field"><span>Base URL</span><input id="model-base-url" type="url" maxlength="2048" autocomplete="off" required placeholder="https://api.example.com"></label>
+        <p class="ollama-context-note" id="ollama-context-note" hidden>Context window: <strong id="ollama-context-length">16K tokens</strong>. Larger windows use more memory. Configure <code>OLLAMA_CONTEXT_LENGTH</code> and restart the Ollama service to change it.</p>
         <p class="model-form-error" id="model-form-error" role="alert" hidden></p>
         <footer class="modal-actions"><button class="stub-button" id="model-cancel" type="button">Cancel</button><button class="stub-button primary" type="submit"><span id="model-submit-label">Use this model</span></button></footer>
       </form>
@@ -214,6 +215,18 @@
         <div class="pull-model-status" id="ollama-pull-status" role="status" hidden><div><span id="ollama-pull-status-text"></span><span id="ollama-pull-percent">0%</span></div><progress id="ollama-pull-progress" max="100" value="0">0%</progress></div>
         <p class="model-form-error" id="ollama-pull-error" role="alert" hidden></p>
         <footer class="modal-actions"><button class="stub-button" id="ollama-pull-cancel" type="button">Cancel</button><button class="stub-button primary" type="submit"><span id="ollama-pull-submit-label">Pull model</span></button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="model-delete-dialog">
+      <form class="modal-card model-form" id="model-delete-form">
+        <header class="modal-header">
+          <div><span class="modal-kicker">Model</span><h2>Delete configuration</h2></div>
+          <button class="modal-close" id="model-delete-close" type="button" aria-label="Close">×</button>
+        </header>
+        <p class="modal-intro">Remove <strong id="model-delete-name"></strong> from Datum? This deletes the saved configuration, not an Ollama model stored on disk.</p>
+        <p class="model-form-error" id="model-delete-error" role="alert" hidden></p>
+        <footer class="modal-actions"><button class="stub-button" id="model-delete-cancel" type="button">Cancel</button><button class="stub-button danger-button" type="submit"><span id="model-delete-submit-label">Delete model</span></button></footer>
       </form>
     </dialog>
 
@@ -246,6 +259,6 @@
       </article>
     </dialog>
   </div>
-  <script type="module" src="/app.js?v=30"></script>
+  <script type="module" src="/app.js?v=32"></script>
 </body>
 </html>

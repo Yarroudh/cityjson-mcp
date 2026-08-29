@@ -13,7 +13,20 @@ function docker(args, options = {}) {
   return spawnSync('docker', args, { cwd: projectRoot, ...options });
 }
 
-for (const requiredImage of [image, ollamaImage]) {
+async function nativeOllamaAvailable() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    const response = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(1_500) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+const useNativeOllama = await nativeOllamaAvailable();
+if (useNativeOllama) console.log('Using native Ollama with Apple Metal acceleration.');
+
+for (const requiredImage of [image, ...(useNativeOllama ? [] : [ollamaImage])]) {
   if (process.exitCode) break;
   const inspected = docker(['image', 'inspect', requiredImage], { stdio: 'ignore' });
   if (inspected.error?.code === 'ENOENT') {
@@ -31,9 +44,16 @@ for (const requiredImage of [image, ollamaImage]) {
 }
 
 if (!process.exitCode) {
+  const composeArgs = ['compose', '-f', composeFile, 'up', '-d', '--no-build', '--pull', 'never'];
+  if (useNativeOllama) composeArgs.push('--no-deps', 'cityjson-chat');
   const result = docker(
-    ['compose', '-f', composeFile, 'up', '-d', '--no-build', '--pull', 'never'],
-    { stdio: 'inherit', env: { ...process.env, CITYJSON_MCP_IMAGE: image, OLLAMA_IMAGE: ollamaImage } }
+    composeArgs,
+    { stdio: 'inherit', env: {
+      ...process.env,
+      CITYJSON_MCP_IMAGE: image,
+      OLLAMA_IMAGE: ollamaImage,
+      ...(useNativeOllama ? { OLLAMA_BASE_URL: 'http://host.docker.internal:11434/v1' } : {})
+    } }
   );
   if (result.error?.code === 'ENOENT') console.error('Docker is not installed or is not available on PATH.');
   process.exitCode = result.status || (result.signal ? 1 : 0);

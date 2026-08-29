@@ -88,6 +88,7 @@ test('ollama uses the OpenAI adapter without requiring a local API key', () => {
   assert.equal(config.provider, 'openai');
   assert.equal(config.service, 'ollama');
   assert.equal(config.apiKey, 'ollama');
+  assert.equal(config.ollamaContextLength, 16384);
   const selected = configuredModel(config, {
     provider: 'ollama',
     model: 'qwen3:8b',
@@ -97,6 +98,11 @@ test('ollama uses the OpenAI adapter without requiring a local API key', () => {
   assert.equal(selected.provider, 'openai');
   assert.equal(selected.service, 'ollama');
   assert.equal(selected.apiKey, 'ollama');
+});
+
+test('ollama context length is configurable and validated', () => {
+  assert.equal(getWebConfig({ OLLAMA_CONTEXT_LENGTH: '8192' }).ollamaContextLength, 8192);
+  assert.throws(() => getWebConfig({ OLLAMA_CONTEXT_LENGTH: '0' }), /OLLAMA_CONTEXT_LENGTH must be a positive integer/);
 });
 
 test('ollama discovery reports an actionable connection error', async t => {
@@ -184,19 +190,22 @@ test('model connection validation rejects a response without the required tool c
 });
 
 test('ollama connection validation uses deterministic model capabilities', async () => {
-  let request;
+  const requests = [];
   const client = createModelClient({
     provider: 'openai', service: 'ollama', apiKey: 'ollama', model: 'qwen3:4b',
     baseUrl: 'http://host.docker.internal:11434/v1', maxOutputTokens: 4096,
     maxToolRounds: 3, temperature: 0.1
   }, async (url, options) => {
-    request = { url, options };
-    return jsonResponse({ capabilities: ['completion', 'tools', 'thinking'] });
+    requests.push({ url, options });
+    if (url.endsWith('/api/show')) return jsonResponse({ capabilities: ['completion', 'tools', 'thinking'] });
+    return jsonResponse({ message: { tool_calls: [{ function: { name: 'cityjson_info', arguments: { dataset_id: 'cj_test' } } }] } });
   });
-  await client.testConnection();
-  assert.equal(request.url, 'http://host.docker.internal:11434/api/show');
-  assert.deepEqual(JSON.parse(request.options.body), { model: 'qwen3:4b' });
-  assert.equal(request.options.headers.authorization, undefined);
+  const compatibility = await client.testConnection();
+  assert.equal(compatibility.rating, 'recommended');
+  assert.equal(requests[0].url, 'http://host.docker.internal:11434/api/show');
+  assert.equal(requests[1].url, 'http://host.docker.internal:11434/api/chat');
+  assert.deepEqual(JSON.parse(requests[0].options.body), { model: 'qwen3:4b' });
+  assert.equal(requests[0].options.headers.authorization, undefined);
 });
 
 test('ollama connection validation rejects models without tool capability', async () => {
@@ -213,8 +222,12 @@ test('HTML versions application assets to prevent cached UI mismatches', async (
     fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8'),
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
-  assert.match(html, /styles\.css\?v=20/);
-  assert.match(html, /app\.js\?v=30/);
+  assert.match(html, /styles\.css\?v=22/);
+  assert.match(html, /app\.js\?v=32/);
+  assert.match(html, /id="model-delete-dialog"/);
+  assert.match(html, /id="ollama-context-note"/);
+  assert.doesNotMatch(app, /window\.confirm/);
+  assert.match(app, /pullController\.abort\(\)/);
   for (const suggestedModel of ['qwen3:4b', 'llama3.2:3b', 'deepseek-r1:1.5b', 'functiongemma:270m']) {
     assert.match(html, new RegExp(suggestedModel.replace('.', '\\.')));
   }

@@ -1,6 +1,8 @@
 services:
   ollama:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    environment:
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:
@@ -22,6 +24,7 @@ services:
       CITYJSON_MCP_WORKSPACE: /data/.cityjson-mcp-workspace
       CITYJSON_MCP_ALLOWED_ROOTS: /data
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434/v1}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
     depends_on:
       ollama:
         condition: service_healthy

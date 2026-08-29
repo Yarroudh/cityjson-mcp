@@ -82,7 +82,7 @@ export function configuredModel(baseConfig, input, previousConfig = baseConfig) 
 }
 
 function publicModelConfig(config) {
-  return { provider: config.service || config.provider, model: config.model, baseUrl: config.baseUrl };
+  return { provider: config.service || config.provider, model: config.model, baseUrl: config.baseUrl, compatibility: config.compatibility || null };
 }
 
 export async function ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId = latestDatasetId, options = {}) {
@@ -296,6 +296,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         sendJson(response, 200, {
           ...publicModelState(browserId),
           ollamaBaseUrl: config.ollamaBaseUrl,
+          ollamaContextLength: config.ollamaContextLength,
           maxUploadBytes: config.maxUploadBytes,
           maxUploadFiles: config.maxUploadFiles,
           toolCount: gateway.tools.length,
@@ -346,14 +347,25 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           throw new Error('Ollama base URL must use HTTP(S) and cannot contain credentials');
         }
         const pullUrl = `${baseUrl.toString().replace(/\/$/, '').replace(/\/v1$/, '')}/api/pull`;
+        const pullController = new AbortController();
+        response.once('close', () => {
+          if (!response.writableEnded && !pullController.signal.aborted) {
+            pullController.abort(new DOMException('The browser cancelled the model pull', 'AbortError'));
+          }
+        });
         let pullResponse;
         try {
           pullResponse = await (dependencies.fetchImpl || fetch)(pullUrl, {
             method: 'POST',
+            signal: pullController.signal,
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ name: model, stream: true })
           });
-        } catch {
+        } catch (error) {
+          if (pullController.signal.aborted) {
+            if (!response.writableEnded) response.end();
+            return;
+          }
           throw new Error(`Could not connect to Ollama at ${baseUrl.origin}. Make sure Ollama is running and reachable from Datum`);
         }
         if (!pullResponse.ok) {
@@ -392,7 +404,8 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           if (!completed) throw new Error('Ollama ended the pull before reporting success');
           emit({ type: 'complete', model });
         } catch (error) {
-          emit({ type: 'error', error: error.message });
+          if (pullController.signal.aborted) emit({ type: 'cancelled', model });
+          else emit({ type: 'error', error: error.message });
         } finally {
           reader.releaseLock();
           response.end();
@@ -405,7 +418,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const id = clientKey(body.clientId);
         const selectedConfig = configuredModel(config, body, { ...config, apiKey: null });
         const selectedClient = createModelClient(selectedConfig, dependencies.fetchImpl || fetch);
-        await selectedClient.testConnection();
+        selectedConfig.compatibility = await selectedClient.testConnection();
         const modelId = `model-${crypto.randomUUID()}`;
         const state = configurationFor(id, true);
         state.profiles.set(modelId, {
@@ -431,7 +444,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         if (!profile) throw new Error('The selected model is unknown or has expired');
         const selectedConfig = configuredModel(config, body, profile.config);
         const selectedClient = createModelClient(selectedConfig, dependencies.fetchImpl || fetch);
-        await selectedClient.testConnection();
+        selectedConfig.compatibility = await selectedClient.testConnection();
         state.profiles.set(profile.id, {
           ...profile,
           config: selectedConfig,
