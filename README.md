@@ -25,6 +25,12 @@ The Docker image includes:
 
 Transformations do not overwrite the source dataset. Each transformation returns a new `dataset_id`.
 
+## Demo
+
+The following video is a demo of Datum, the chat application in this repository. It shows importing a CityJSON file, inspecting it, creating a subset, and downloading the derived dataset.
+
+![Datum demo](assets/Demo.mov)
+
 ## Quick start: Datum chat application
 
 Datum is the main application in this repository. It accepts CityJSON attachments in the browser, imports them through MCP, and lets a configured model call the CityJSON tools.
