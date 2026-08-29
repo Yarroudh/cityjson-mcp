@@ -23,8 +23,6 @@ The Docker image includes:
 - `citygml-tools` for CityGML and CityJSON conversion.
 - `cjdb` for PostgreSQL/PostGIS import and export.
 
-Transformations do not overwrite the source dataset. Each transformation returns a new `dataset_id`.
-
 ## Demo
 
 The following video is a demo of Datum, the chat application in this repository. It shows importing a CityJSON file, inspecting it, creating a subset, and downloading the derived dataset.
@@ -449,11 +447,10 @@ Do not include API keys, database passwords, private CityJSON datasets, generate
 
 ## Next
 
-- [ ] Add explicit Ollama setup and model presets for local OpenAI-compatible models.
+- [ ] Add explicit Ollama setup and model presets for local models.
 - [x] Stream model responses and tool progress to the browser.
 - [x] Add cancellation and progress reporting for long validation and conversion jobs.
 - [x] Add an optional 3D preview for imported and derived datasets.
-- [ ] Add management controls for cached conversations, model profiles, and workspace files.
 
 ## Tests
 
