@@ -117,11 +117,15 @@ MODEL_TEMPERATURE=0.1
 OLLAMA_CONTEXT_LENGTH=16384
 ```
 
-You can also select Ollama in Datum, pull a suggested model with the add button, cancel a pull in progress, or refresh the custom model list. `npm run chat:stop` stops both containers without deleting downloaded models. Deleting a model from Datum removes only its saved configuration; it does not remove the downloaded model from Ollama.
+You can also select Ollama in Datum and pull a model with the add button. `npm run chat:stop` stops both containers without deleting downloaded models. Deleting a model from Datum removes only its saved configuration; it does not remove the downloaded model from Ollama. If you want the downloaded model deleted, please use the following command:
 
-Local model quality and memory requirements vary. Datum evaluates a model's metadata and actual tool-call output, then marks it **Recommended** or **Limited** in the model menu. Limited models remain usable, but may be less reliable for CityJSON workflows.
+```bash
+ollama rm <model-name>
+```
 
-The default `16384`-token context is a practical balance. Use `8192` on memory-constrained machines or `32768` for longer conversations when sufficient memory is available. For bundled Docker Ollama, change `OLLAMA_CONTEXT_LENGTH` in `.env` and restart Datum. For native Ollama, set the same variable when launching Ollama and restart that service. Ollama applies this globally because its OpenAI-compatible endpoint does not accept the context size per request.
+Local model quality and memory requirements vary. Datum evaluates a model's metadata and actual call output, then marks it **Recommended** or **Limited** in the model menu. Limited models remain usable, but may be less reliable for CityJSON workflows.
+
+The default `16384` tokens context is a practical balance. Use `8192` if you have memory constraints or `32768` for longer conversations when sufficient memory is available. For bundled Docker Ollama, change `OLLAMA_CONTEXT_LENGTH` in `.env` and restart Datum. For native Ollama, set the same variable when launching Ollama and restart that service. Ollama applies this globally because its OpenAI-compatible endpoint does not accept the context size per request.
 
 ### Other model services
 
