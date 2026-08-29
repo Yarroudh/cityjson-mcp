@@ -50,13 +50,16 @@ function numberInRange(value, fallback, name, minimum, maximum) {
 }
 
 export function getWebConfig(env = process.env) {
-  const provider = (env.MODEL_PROVIDER || 'anthropic').toLowerCase();
-  if (!['anthropic', 'openai'].includes(provider)) throw new Error('MODEL_PROVIDER must be anthropic or openai');
-  const apiKey = env.MODEL_API_KEY || (provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY) || null;
+  const requestedProvider = (env.MODEL_PROVIDER || 'anthropic').toLowerCase();
+  if (!['anthropic', 'openai', 'ollama'].includes(requestedProvider)) throw new Error('MODEL_PROVIDER must be anthropic, openai, or ollama');
+  const service = requestedProvider === 'ollama' ? 'ollama' : requestedProvider;
+  const provider = requestedProvider === 'ollama' ? 'openai' : requestedProvider;
+  const apiKey = env.MODEL_API_KEY || (provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY) || (service === 'ollama' ? 'ollama' : null);
   const model = env.MODEL_NAME?.trim() || null;
 
   return {
     provider,
+    service,
     apiKey,
     model,
     baseUrl: env.MODEL_BASE_URL || (provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'),

@@ -25,6 +25,8 @@ test('README presents Datum first and contains required setup sections', async (
   assert.match(readme, /gemini-3\.7-flash/);
   assert.match(readme, /Google AI Studio/);
   assert.match(readme, /free-tier content may be used to improve its products/);
+  assert.match(readme, /### Local models with Ollama/);
+  assert.match(readme, /host\.docker\.internal:11434\/v1/);
   assert.ok(readme.indexOf('## Quick start: Datum chat application') < readme.indexOf('## Use the MCP server without Datum'));
 });
 

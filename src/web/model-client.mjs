@@ -24,6 +24,10 @@ function apiUrl(baseUrl, pathname) {
   return `${baseUrl.replace(/\/$/, '')}${pathname}`;
 }
 
+function ollamaApiUrl(baseUrl, pathname) {
+  return `${baseUrl.replace(/\/$/, '').replace(/\/v1$/, '')}${pathname}`;
+}
+
 async function fetchJson(fetchImpl, url, options) {
   const response = await fetchImpl(url, options);
   const text = await response.text();
@@ -291,6 +295,18 @@ class OpenAIModelClient {
   }
 
   async testConnection() {
+    if (this.config.service === 'ollama') {
+      const response = await fetchJson(this.fetch, ollamaApiUrl(this.config.baseUrl, '/api/show'), {
+        method: 'POST',
+        signal: AbortSignal.timeout(30_000),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: this.config.model })
+      });
+      if (!response.capabilities?.includes('tools')) {
+        throw new Error('The selected Ollama model does not advertise tool-calling support');
+      }
+      return;
+    }
     const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), {
       method: 'POST',
       signal: AbortSignal.timeout(30_000),

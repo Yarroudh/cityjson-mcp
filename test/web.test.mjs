@@ -79,12 +79,56 @@ test('provider selects an API style while model vendor and base URL remain indep
   assert.equal(config.baseUrl, 'https://api.deepseek.com');
 });
 
+test('ollama uses the OpenAI adapter without requiring a local API key', () => {
+  const config = getWebConfig({
+    MODEL_PROVIDER: 'ollama',
+    MODEL_NAME: 'qwen3:8b',
+    MODEL_BASE_URL: 'http://host.docker.internal:11434/v1'
+  });
+  assert.equal(config.provider, 'openai');
+  assert.equal(config.service, 'ollama');
+  assert.equal(config.apiKey, 'ollama');
+  const selected = configuredModel(config, {
+    provider: 'ollama',
+    model: 'qwen3:8b',
+    apiKey: '',
+    baseUrl: 'http://host.docker.internal:11434/v1'
+  }, { ...config, apiKey: null });
+  assert.equal(selected.provider, 'openai');
+  assert.equal(selected.service, 'ollama');
+  assert.equal(selected.apiKey, 'ollama');
+});
+
+test('ollama discovery reports an actionable connection error', async t => {
+  const input = await fs.mkdtemp(path.join(os.tmpdir(), 'cityjson-ollama-error-'));
+  const gateway = {
+    tools: [], async connect() {}, async close() {}, modelTools() { return []; },
+    async call(name) {
+      if (name === 'cityjson_backend_status') return {
+        isError: false,
+        structuredContent: { backends: Object.fromEntries(['cjio', 'cjval', 'val3dity', 'citygmlTools', 'cjdb'].map(key => [key, { available: true }])) }
+      };
+      throw new Error(`Unexpected tool ${name}`);
+    }
+  };
+  const config = getWebConfig({ CITYJSON_MCP_INPUT: input });
+  const app = await createChatApplication(config, { gateway, fetchImpl: async () => { throw new TypeError('fetch failed'); } });
+  t.after(async () => {
+    await app.close();
+    await fs.rm(input, { recursive: true, force: true });
+  });
+  const response = await applicationRequest(app.server, 'GET', '/api/models/discover?provider=ollama&baseUrl=http%3A%2F%2Fhost.docker.internal%3A11434%2Fv1');
+  assert.equal(response.status, 400);
+  assert.match(JSON.parse(response.body).error, /Could not connect to Ollama at http:\/\/host\.docker\.internal:11434/);
+  assert.match(JSON.parse(response.body).error, /Make sure Ollama is running/);
+});
+
 test('provider rejects values that are not supported API styles', () => {
   assert.throws(() => getWebConfig({
     MODEL_PROVIDER: 'deepseek',
     MODEL_NAME: 'deepseek-v4-pro',
     MODEL_API_KEY: 'test'
-  }), /MODEL_PROVIDER must be anthropic or openai/);
+  }), /MODEL_PROVIDER must be anthropic, openai, or ollama/);
 });
 
 test('chat host can start its configuration flow without model credentials', () => {
@@ -139,13 +183,38 @@ test('model connection validation rejects a response without the required tool c
   await assert.rejects(client.testConnection(), /did not complete the required tool-call test/);
 });
 
+test('ollama connection validation uses deterministic model capabilities', async () => {
+  let request;
+  const client = createModelClient({
+    provider: 'openai', service: 'ollama', apiKey: 'ollama', model: 'qwen3:4b',
+    baseUrl: 'http://host.docker.internal:11434/v1', maxOutputTokens: 4096,
+    maxToolRounds: 3, temperature: 0.1
+  }, async (url, options) => {
+    request = { url, options };
+    return jsonResponse({ capabilities: ['completion', 'tools', 'thinking'] });
+  });
+  await client.testConnection();
+  assert.equal(request.url, 'http://host.docker.internal:11434/api/show');
+  assert.deepEqual(JSON.parse(request.options.body), { model: 'qwen3:4b' });
+  assert.equal(request.options.headers.authorization, undefined);
+});
+
+test('ollama connection validation rejects models without tool capability', async () => {
+  const client = createModelClient({
+    provider: 'openai', service: 'ollama', apiKey: 'ollama', model: 'embedding-only',
+    baseUrl: 'http://localhost:11434/v1', maxOutputTokens: 4096,
+    maxToolRounds: 3, temperature: 0.1
+  }, async () => jsonResponse({ capabilities: ['embedding'] }));
+  await assert.rejects(client.testConnection(), /does not advertise tool-calling support/);
+});
+
 test('HTML versions application assets to prevent cached UI mismatches', async () => {
   const [html, app] = await Promise.all([
     fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8'),
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
   assert.match(html, /styles\.css\?v=17/);
-  assert.match(html, /app\.js\?v=23/);
+  assert.match(html, /app\.js\?v=25/);
   assert.match(html, /favicon\.svg\?v=1/);
   assert.match(app, /messageActionButton\('Retry question', MESSAGE_ICONS\.retry/);
   assert.match(app, /messageActionButton\('Copy message', MESSAGE_ICONS\.copy/);
@@ -429,6 +498,7 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   });
   const modelTestRequests = [];
   const fetchImpl = async (url, options) => {
+    if (url.endsWith('/api/tags')) return jsonResponse({ models: [{ name: 'qwen3:8b' }, { name: 'gpt-oss:20b' }] });
     const body = JSON.parse(options.body);
     modelTestRequests.push({ url, body });
     if (body.model === 'invalid-model') return jsonResponse({ error: { message: 'Invalid API key or model' } }, 401);
@@ -452,6 +522,10 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   const initial = JSON.parse(initialResult.body);
   assert.equal(initial.activeModelId, 'default');
   assert.equal(initial.models.length, 1);
+
+  const discoveryResponse = await applicationRequest(app.server, 'GET', '/api/models/discover?provider=ollama&baseUrl=http%3A%2F%2Fhost.docker.internal%3A11434%2Fv1');
+  assert.equal(discoveryResponse.status, 200);
+  assert.deepEqual(JSON.parse(discoveryResponse.body).models, ['qwen3:8b', 'gpt-oss:20b']);
 
   const rejectedResponse = await applicationRequest(app.server, 'POST', '/api/models', {
     clientId,

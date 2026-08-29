@@ -27,7 +27,7 @@ The Docker image includes:
 
 The following video is a demo of Datum, the chat application in this repository. It shows importing a CityJSON file, inspecting it, creating a subset, and downloading the derived dataset.
 
-![Datum demo](assets/Demo.mov)
+![Datum demo](assets/Demo.mp4)
 
 ## Quick start: Datum chat application
 
@@ -67,9 +67,9 @@ The model settings mean:
 
 | Variable | Required | Description |
 |---|---:|---|
-| `MODEL_PROVIDER` | yes | API request format. Use `openai` for OpenAI-compatible Chat Completions or `anthropic` for Anthropic Messages. This value describes the API format, not the model company. |
+| `MODEL_PROVIDER` | yes | Model API selection: `openai`, `anthropic`, or `ollama`. Ollama uses its OpenAI-compatible Chat Completions endpoint internally. |
 | `MODEL_NAME` | yes | Exact model identifier sent to the provider, for example `gemini-3.7-flash`. The model must support tool calls. |
-| `MODEL_API_KEY` | yes | API credential issued by the model provider. Do not commit `.env`. |
+| `MODEL_API_KEY` | except Ollama | API credential issued by the model provider. Local Ollama needs no key. Do not commit `.env`. |
 | `MODEL_BASE_URL` | yes | Base URL for the provider API. |
 | `MODEL_TEMPERATURE` | no | Sampling temperature. Datum defaults to `0.1`. |
 
@@ -101,12 +101,37 @@ The base URL above is Google's documented [OpenAI compatibility endpoint](https:
 
 Check the [Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricing) and [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits) because free-tier quotas can change.
 
+### Local models with Ollama
+
+Install [Ollama](https://ollama.com/download), start it, and pull a model that supports tool calling. For example:
+
+```bash
+ollama pull qwen3:8b
+```
+
+Because `npm run chat` runs Datum in Docker, configure the host bridge address in `.env`:
+
+```dotenv
+MODEL_PROVIDER=ollama
+MODEL_NAME=qwen3:8b
+MODEL_API_KEY=
+MODEL_BASE_URL=http://host.docker.internal:11434/v1
+MODEL_TEMPERATURE=0.1
+```
+
+Then run `npm run chat`. You can also add Ollama from Datum's model menu and use **Load installed Ollama models** to discover models already present on the server. When running Datum directly with `npm run chat:host`, use `http://127.0.0.1:11434/v1` instead.
+
+The Docker configuration maps `host.docker.internal` on Linux as well as Docker Desktop. Ollama binds to `127.0.0.1:11434` by default; if a Linux container still cannot connect, configure Ollama to listen on an address reachable from Docker. Do not expose an unauthenticated Ollama server to an untrusted network.
+
+Local model quality and memory requirements vary. Datum validates new configurations with a tool-call test, but larger CityJSON workflows still require a model that can reliably select tools and produce valid arguments.
+
 ### Other model services
 
 Datum can use any model that supports tool calls through one of its two API formats. Examples:
 
 | Service | `MODEL_PROVIDER` | Example model | `MODEL_BASE_URL` |
 |---|---|---|---|
+| Ollama | `ollama` | `qwen3:8b` | `http://host.docker.internal:11434/v1` |
 | Google Gemini | `openai` | `gemini-3.7-flash` | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | DeepSeek | `openai` | `deepseek-v4-pro` | `https://api.deepseek.com` |
 | OpenAI GPT | `openai` | a current GPT model with Chat Completions tool calling | `https://api.openai.com/v1` |
@@ -368,7 +393,7 @@ Expected tools: `cityjson_import`, `cityjson_clean_vertices`, `cityjson_validate
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MODEL_PROVIDER` | `anthropic` | Model API format: `anthropic` or `openai`. |
+| `MODEL_PROVIDER` | `anthropic` | Model API selection: `anthropic`, `openai`, or `ollama`. |
 | `MODEL_NAME` | none | Default Datum model identifier. |
 | `MODEL_API_KEY` | none | Default Datum model API key. |
 | `MODEL_BASE_URL` | provider default | Model API base URL. |

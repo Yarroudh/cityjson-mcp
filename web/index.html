@@ -185,9 +185,10 @@
           <div><span class="modal-kicker">Model</span><h2 id="model-dialog-title">Add a model</h2></div>
           <button class="modal-close" id="model-dialog-close" type="button" aria-label="Close">×</button>
         </header>
-        <p class="modal-intro" id="model-dialog-intro">Add an Anthropic Messages or OpenAI-compatible model. Credentials stay in the running application and are never displayed after saving.</p>
-        <label class="field"><span>API style</span><select id="model-provider" required><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
-        <label class="field"><span>Model name</span><input id="model-name" type="text" maxlength="200" autocomplete="off" required placeholder="e.g. gemini-3.7-flash"></label>
+        <p class="modal-intro" id="model-dialog-intro">Add an Ollama, Anthropic Messages, or OpenAI-compatible model. Credentials stay in the running application and are never displayed after saving.</p>
+        <label class="field"><span>Provider</span><select id="model-provider" required><option value="ollama">Ollama (local)</option><option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic</option></select></label>
+        <label class="field"><span>Model name</span><input id="model-name" type="text" list="ollama-models" maxlength="200" autocomplete="off" required placeholder="e.g. qwen3:8b"><datalist id="ollama-models"></datalist></label>
+        <button class="stub-button" id="discover-models" type="button">Load installed Ollama models</button>
         <label class="field"><span>API key</span><input id="model-api-key" type="password" maxlength="10000" autocomplete="new-password" required placeholder="Enter the API key"></label>
         <label class="field"><span>Base URL</span><input id="model-base-url" type="url" maxlength="2048" autocomplete="off" required placeholder="https://api.example.com"></label>
         <p class="model-form-error" id="model-form-error" role="alert" hidden></p>
@@ -224,6 +225,6 @@
       </article>
     </dialog>
   </div>
-  <script type="module" src="/app.js?v=23"></script>
+  <script type="module" src="/app.js?v=25"></script>
 </body>
 </html>

@@ -12,6 +12,8 @@ services:
       CITYJSON_MCP_ALLOWED_ROOTS: /data
     ports:
       - "127.0.0.1:3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../src:/app/src:ro
       - ../web:/app/web:ro
