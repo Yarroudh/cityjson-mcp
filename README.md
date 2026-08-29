@@ -27,7 +27,7 @@ The Docker image includes:
 
 The following video is a demo of Datum, the chat application in this repository. It shows importing a CityJSON file, inspecting it, creating a subset, and downloading the derived dataset.
 
-![Datum demo](https://www.youtube.com/watch?v=Pq2LojuAm-4)
+[![Datum demo](https://img.youtube.com/vi/Pq2LojuAm-4/maxresdefault.jpg)](https://www.youtube.com/watch?v=Pq2LojuAm-4)
 
 ## Quick start: Datum chat application
 
@@ -167,18 +167,14 @@ The application binds to `127.0.0.1:3000`. Docker volumes store imported files, 
 Build the image before `npm run chat` when you want to run local source changes:
 
 ```bash
+npm run docker:cache:val3dity
+npm run docker:cache:cjval
 npm run docker:build
 npm run docker:doctor
 npm run chat
 ```
 
-The `val3dity` and `cjval` build stages take the most time. They can be cached separately:
-
-```bash
-npm run docker:cache:val3dity
-npm run docker:cache:cjval
-npm run docker:build
-```
+The `val3dity` and `cjval` build stages take the most time. They can be cached separately.
 
 Set `CITYJSON_MCP_IMAGE` to use another image name:
 
