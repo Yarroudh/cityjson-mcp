@@ -39,7 +39,7 @@ Datum is the official AI client provided with CityJSON MCP toolbox. It accepts C
 - Node.js 20 or newer.
 - (optional) An API key for a model that supports tool calls.
 
-> Datum supports local Ollama models. However, for optimal performance and reliability, we recommend using a cloud model. Local models may encounter memory constraints, particularly with larger workloads, and have not yet been extensively tested with Datum.
+> Datum supports local Ollama models. However, for optimal performance and reliability, we recommend using a cloud model. Local models may encounter memory constraints, particularly with larger workloads, and have not yet been extensively tested.
 
 ### 1. Install the JavaScript dependencies
 
@@ -71,12 +71,12 @@ The model settings mean:
 |---|---:|---|
 | `MODEL_PROVIDER` | yes | Model API selection: `openai`, `anthropic`, or `ollama`. Ollama uses the OpenAI Chat Completions format internally. |
 | `MODEL_NAME` | yes | Exact model identifier sent to the provider, for example `gemini-3.7-flash`. The model must support tool calls. |
-| `MODEL_API_KEY` | except Ollama | API credential issued by the model provider. Local Ollama needs no key. Do not commit `.env`. |
+| `MODEL_API_KEY` | except Ollama | API credential issued by the model provider. Local Ollama needs no key. |
 | `MODEL_BASE_URL` | yes | Base URL for the provider API. |
 | `MODEL_TEMPERATURE` | no | Sampling temperature. Datum defaults to `0.1`. |
 | `OLLAMA_CONTEXT_LENGTH` | no | Ollama context window in tokens. Defaults to `16384`; larger values use more RAM or VRAM. |
 
-The `.env` model is the default model in Datum. Users can add other models from the model menu. Models added through the interface remain in server memory for up to eight hours. Their API keys are not returned to the browser or passed to MCP tools.
+The `.env` model is the default model in Datum. Users can add other models from the model menu in the UI. Models added through the interface remain in server memory for up to eight hours. Their API keys are not returned to the browser or passed to MCP tools.
 
 ### Free model for testing
 
@@ -98,7 +98,7 @@ Create and configure a Gemini API key:
    MODEL_TEMPERATURE=0.1
    ```
 
-6. Run `npm run chat`, open <http://127.0.0.1:3000>, import a CityJSON file, and select one of the suggested questions.
+6. Run `npm run chat`, open <http://127.0.0.1:3000>, import a CityJSON file, and select one of the suggested questions or enter your own prompt.
 
 The base URL above is Google's documented [OpenAI compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai), which is why `MODEL_PROVIDER` remains `openai`.
 
@@ -106,7 +106,9 @@ Check the [Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricin
 
 ### Local models with Ollama
 
-No separate Ollama installation is required for the Docker quick start. `npm run chat` automatically downloads the official Ollama image when needed, starts it beside Datum, and keeps downloaded models in a persistent Docker volume. On macOS, it first looks for Ollama running natively at `127.0.0.1:11434` and uses it when available so models can use Apple Metal acceleration; otherwise it falls back to the bundled Docker service.
+No separate Ollama installation is required for the Docker quick start. `npm run chat` automatically downloads the official Ollama image when needed, starts it beside Datum, and keeps downloaded models in a persistent Docker volume. 
+
+> On `macOS`, it first looks for Ollama running natively at `127.0.0.1:11434` and uses it when available so models can use `Apple Metal` acceleration; otherwise it falls back to the bundled Docker service.
 
 To make an Ollama model the default, configure `.env`:
 
@@ -119,7 +121,11 @@ MODEL_TEMPERATURE=0.1
 OLLAMA_CONTEXT_LENGTH=16384
 ```
 
-You can also select Ollama in Datum and pull a model with the add button. `npm run chat:stop` stops both containers without deleting downloaded models. Deleting a model from Datum removes only its saved configuration; it does not remove the downloaded model from Ollama. If you want the downloaded model deleted, please use the following command:
+> ❗ **Important:** Always make sure to use a model that supports **tool calls**. For more information, please refer to: https://ollama.com/search?c=tools
+
+You can also select Ollama in Datum UI and pull a model with the add button. 
+
+Deleting a model from Datum removes only its saved configuration; it does not remove the downloaded model from Ollama. If you want the downloaded model deleted, please use the following command:
 
 ```bash
 ollama rm <model-name>
@@ -127,11 +133,11 @@ ollama rm <model-name>
 
 Local model quality and memory requirements vary. Datum evaluates a model's metadata and actual call output, then marks it **Recommended** or **Limited** in the model menu. Limited models remain usable, but may be less reliable for CityJSON workflows.
 
-The default `16384` tokens context is a practical balance. Use `8192` if you have memory constraints or `32768` for longer conversations when sufficient memory is available. For bundled Docker Ollama, change `OLLAMA_CONTEXT_LENGTH` in `.env` and restart Datum. For native Ollama, set the same variable when launching Ollama and restart that service. Ollama applies this globally because its OpenAI-compatible endpoint does not accept the context size per request.
+The default `16384` tokens context is a practical balance. Use `8192` if you have memory constraints or `32768` for longer conversations when sufficient memory is available. For bundled Docker Ollama, change `OLLAMA_CONTEXT_LENGTH` in `.env` and restart Datum. For native Ollama, set the same variable when launching Ollama and restart that service. Ollama applies this globally because its API endpoint does not accept the context size per request.
 
 ### Other model services
 
-Datum can use any model that supports tool calls through one of its two API formats. Examples:
+Datum can use any model that supports `tool calls` through one of its two API formats. Examples:
 
 | Service | `MODEL_PROVIDER` | Example model | `MODEL_BASE_URL` |
 |---|---|---|---|
@@ -186,11 +192,7 @@ npm run chat
 
 The `val3dity` and `cjval` build stages take the most time. They can be cached separately.
 
-Set `CITYJSON_MCP_IMAGE` to use another image name:
-
-```bash
-CITYJSON_MCP_IMAGE=example/cityjson-mcp:tag npm run chat
-```
+Set `CITYJSON_MCP_IMAGE` to use your created Docker image.
 
 ## Use the MCP server without Datum
 
@@ -237,7 +239,7 @@ Place `model.city.json` in the mounted folder, then ask the client:
 
 The model should call `cityjson_import` with the filename. It should not send the full file through `cityjson_import_text`.
 
-Paths created by a chat client, such as `/mnt/user-data/...`, do not automatically exist in the MCP container. Use the mounted inbox or a client that implements attachment handling, such as Datum.
+Paths created by a chat client, such as `/mnt/user-data/...`, do not automatically exist in the MCP container.
 
 ### Claude Desktop
 
@@ -368,25 +370,25 @@ Each tool in this table returns a new dataset handle.
 
 ### Inspect a file
 
-> Import `tile.city.json`. Report the version, CRS, object counts by type, LoDs, attributes, and extensions. Do not modify the dataset.
+> Import `model.city.json`. Report the version, CRS, object counts by type, LoDs, attributes, and extensions. Do not modify the dataset.
 
 Expected tools: `cityjson_import`, `cityjson_info`.
 
 ### Validate a file
 
-> Import `tile.city.json`. Run structural and geometric validation. Separate cjval findings from val3dity findings and list affected object IDs.
+> Import `model.city.json`. Run structural and geometric validation. Separate cjval findings from val3dity findings and list affected object IDs.
 
 Expected tools: `cityjson_import`, `cityjson_validate`.
 
 ### Create a subset
 
-> Import `city.city.json`. Keep Building and BuildingPart objects inside bbox `[85000, 446000, 86000, 447000]`, keep LoD 2.2, reproject to EPSG:28992, validate the result, and give me the resulting file.
+> Import `model.city.json`. Keep Building and BuildingPart objects inside bbox `[85000, 446000, 86000, 447000]`, keep LoD 2.2, reproject to EPSG:28992, validate the result, and give me the resulting file.
 
 Expected tools: `cityjson_import`, `cityjson_subset`, `cityjson_filter_lod`, `cityjson_reproject`, `cityjson_validate`, `cityjson_download`.
 
 ### Clean and download
 
-> Import `tile.city.json`. Remove duplicate and unused vertices, validate the derived dataset, and return it as `tile-clean.city.json`. Do not overwrite the source.
+> Import `model.city.json`. Remove duplicate and unused vertices, validate the derived dataset, and return it as `tile-clean.city.json`. Do not overwrite the source.
 
 Expected tools: `cityjson_import`, `cityjson_clean_vertices`, `cityjson_validate`, `cityjson_download`.
 
@@ -443,7 +445,7 @@ Manual Ollama installation is needed only when running Datum directly with `npm 
   ollama serve
   ```
 
-In another terminal, pull a tool-capable model and verify the installation:
+In another terminal, pull a model that supports **tool calls** and verify the installation:
 
 ```bash
 ollama pull qwen3:8b
@@ -533,8 +535,8 @@ npm run docker:doctor
 
 ## Known limitations
 
-- Dataset handles are process-local. Restarting the MCP server invalidates existing `dataset_id` values.
-- Native inspection loads regular CityJSON JSON files into memory.
+- Dataset handles are scoped to the current process. If the MCP server restarts, any existing `dataset_id` values become invalid and must be recreated.
+- Native inspection loads regular CityJSON files into memory.
 - `cityjson_query` computes bounding boxes from geometry stored directly on each object. It does not combine all child geometry into a parent bounding box.
 - Specification, schema, and extension lookup tools require network access, except for `cityjson_spec_outline`.
 - Derived workspace files are not deleted automatically.
@@ -555,7 +557,7 @@ npm run docker:doctor
 
 ## Citation
 
-If you use this project in your research, please cite it as follows.
+We are committed to supporting open and reproducible research and welcome the use of this project in academic and scientific work. If you use this project in your research, please cite it as follows:
 
 ### APA
 
@@ -584,3 +586,11 @@ If you use this project in your research, please cite it as follows.
 This repository uses the MIT License. See [LICENSE](LICENSE).
 
 The bundled image invokes external programs under their own licenses. This repository does not relicense those programs.
+
+## About Developer
+
+This project is developed and maintained by **Anass Yarroudh**, a Data Scientist and Machine Learning Engineer at **GIM**, and a Research Associate at the **University of Liège**.
+
+This repository is a personal side project developed independently. It is **not affiliated with, endorsed by, or maintained on behalf of GIM or the University of Liège**.
+
+For professional inquiries or to connect, feel free to reach out on [LinkedIn](https://www.linkedin.com/in/anass-yarroudh/).
