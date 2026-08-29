@@ -39,7 +39,7 @@ Datum is the official AI client provided with CityJSON MCP toolbox. It accepts C
 - Node.js 20 or newer.
 - (optional) An API key for a model that supports tool calls.
 
-> Datum supports Ollama OpenAI-compatible models. However, we recommend using a cloud model for better performance. Local models could struggle from memory limitations and are not fully tested.
+> Datum supports local Ollama models. However, for optimal performance and reliability, we recommend using a cloud model. Local models may encounter memory constraints, particularly with larger workloads, and have not yet been extensively tested with Datum.
 
 ### 1. Install the JavaScript dependencies
 
