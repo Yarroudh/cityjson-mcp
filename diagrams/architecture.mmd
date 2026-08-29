@@ -1,30 +1,37 @@
 flowchart LR
-  CLIENT["MCP clients<br/>Claude Desktop · Cursor · VS Code"]
-  BROWSER["One-page chat<br/>browser + attachments"]
-  CHAT["Chat host<br/>model API + MCP client"]
-  MODEL["Tool-capable model<br/>Anthropic · OpenAI"]
-  INPUT["Input inbox<br/>streamed CityJSON files"]
-  SERVER["Docker container<br/>CityJSON MCP · stdio server"]
-  CORE["Dataset manager<br/>immutable handles + path policy"]
-  NATIVE["Native inspection/query<br/>JSON + CityObjects + bbox"]
-  CJIO["cjio<br/>transform · subset · export"]
-  CJVAL["cjval<br/>schema + structural validation"]
-  VAL3["val3dity<br/>3D geometry validation"]
-  CGML["citygml-tools<br/>CityGML ↔ CityJSON"]
-  CJDB["cjdb + PostGIS<br/>persistence"]
-  KNOW["CityJSON 2.0.2 references<br/>spec + schemas + extensions"]
+  CLIENT["Clients"]
+  BROWSER["Interface"]
+  CHAT["Host<br/>model control<br/>tool client"]
+  MODEL["Model"]
+  INPUT["Input<br/>streamed data"]
 
-  CLIENT -->|MCP stdio| SERVER
+  SERVER["Server"]
+  CORE["Data manager<br/>handles<br/>access rules"]
+
+  NATIVE["Query<br/>metadata<br/>objects<br/>bounds"]
+  CJIO["cjio<br/>transform<br/>subset<br/>export"]
+  CJVAL["cjval<br/>schema<br/>structure"]
+  VAL3["val3dity<br/>geometry validation"]
+  CGML["citygml-tools<br/>format conversion"]
+  CJDB["cjdb<br/>storage"]
+  KNOW["CityJSON references<br/>specification<br/>schemas<br/>extensions"]
+
+  CLIENT -->|protocol| SERVER
+
   BROWSER --> CHAT
   BROWSER -->|file stream| INPUT
+
   CHAT --> MODEL
-  CHAT -->|MCP stdio| SERVER
+  CHAT -->|protocol| SERVER
+
   INPUT --> CORE
   SERVER --> CORE
+
   CORE --> NATIVE
   CORE --> CJIO
   CORE --> CJVAL
   CORE --> VAL3
   CORE --> CGML
   CORE --> CJDB
+
   SERVER --> KNOW
