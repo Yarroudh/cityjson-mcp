@@ -27,7 +27,7 @@ The Docker image includes:
 
 The following video is a demo of Datum, the chat application in this repository. It shows importing a CityJSON file, inspecting it, creating a subset, and downloading the derived dataset.
 
-![Datum demo](assets/Demo.mp4)
+![Datum demo](https://www.youtube.com/watch?v=Pq2LojuAm-4)
 
 ## Quick start: Datum chat application
 
@@ -67,7 +67,7 @@ The model settings mean:
 
 | Variable | Required | Description |
 |---|---:|---|
-| `MODEL_PROVIDER` | yes | Model API selection: `openai`, `anthropic`, or `ollama`. Ollama uses its OpenAI-compatible Chat Completions endpoint internally. |
+| `MODEL_PROVIDER` | yes | Model API selection: `openai`, `anthropic`, or `ollama`. Ollama uses the OpenAI Chat Completions format internally. |
 | `MODEL_NAME` | yes | Exact model identifier sent to the provider, for example `gemini-3.7-flash`. The model must support tool calls. |
 | `MODEL_API_KEY` | except Ollama | API credential issued by the model provider. Local Ollama needs no key. Do not commit `.env`. |
 | `MODEL_BASE_URL` | yes | Base URL for the provider API. |
@@ -103,25 +103,19 @@ Check the [Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricin
 
 ### Local models with Ollama
 
-Install [Ollama](https://ollama.com/download), start it, and pull a model that supports tool calling. For example:
+No separate Ollama installation is required for the Docker quick start. `npm run chat` automatically downloads the official Ollama image when needed, starts it beside Datum, and keeps downloaded models in a persistent Docker volume.
 
-```bash
-ollama pull qwen3:8b
-```
-
-Because `npm run chat` runs Datum in Docker, configure the host bridge address in `.env`:
+To make an Ollama model the default, configure `.env`:
 
 ```dotenv
 MODEL_PROVIDER=ollama
 MODEL_NAME=qwen3:8b
 MODEL_API_KEY=
-MODEL_BASE_URL=http://host.docker.internal:11434/v1
+MODEL_BASE_URL=http://ollama:11434/v1
 MODEL_TEMPERATURE=0.1
 ```
 
-Then run `npm run chat`. You can also add Ollama from Datum's model menu and use **Load installed Ollama models** to discover models already present on the server. When running Datum directly with `npm run chat:host`, use `http://127.0.0.1:11434/v1` instead.
-
-The Docker configuration maps `host.docker.internal` on Linux as well as Docker Desktop. Ollama binds to `127.0.0.1:11434` by default; if a Linux container still cannot connect, configure Ollama to listen on an address reachable from Docker. Do not expose an unauthenticated Ollama server to an untrusted network.
+You can also select Ollama in Datum, pull a suggested model with the add button, or refresh the custom model list. `npm run chat:stop` stops both containers without deleting downloaded models.
 
 Local model quality and memory requirements vary. Datum validates new configurations with a tool-call test, but larger CityJSON workflows still require a model that can reliably select tools and produce valid arguments.
 
@@ -131,7 +125,7 @@ Datum can use any model that supports tool calls through one of its two API form
 
 | Service | `MODEL_PROVIDER` | Example model | `MODEL_BASE_URL` |
 |---|---|---|---|
-| Ollama | `ollama` | `qwen3:8b` | `http://host.docker.internal:11434/v1` |
+| Ollama | `ollama` | `qwen3:8b` | `http://ollama:11434/v1` |
 | Google Gemini | `openai` | `gemini-3.7-flash` | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | DeepSeek | `openai` | `deepseek-v4-pro` | `https://api.deepseek.com` |
 | OpenAI GPT | `openai` | a current GPT model with Chat Completions tool calling | `https://api.openai.com/v1` |
@@ -161,11 +155,12 @@ npm run chat:stop
 
 `npm run chat` uses this image-selection sequence:
 
-1. Check whether `yarroudh/cityjson-mcp:latest` exists locally.
-2. Pull it from Docker Hub only when it is not available locally.
-3. Start the chat application in detached mode without building an image.
+1. Check whether the CityJSON MCP and official Ollama images exist locally.
+2. Pull either missing image from its registry.
+3. Start Ollama and wait for it to become healthy.
+4. Start the chat application in detached mode without building an image.
 
-The application binds to `127.0.0.1:3000`. Docker volumes store imported files and derived datasets.
+The application binds to `127.0.0.1:3000`. Docker volumes store imported files, derived datasets, and downloaded Ollama models. Ollama is available only to the internal Compose network and is not published on a host port.
 
 ### Optional: build the image locally
 
@@ -429,6 +424,38 @@ npm run check
 npm start
 ```
 
+### Install Ollama manually
+
+Manual Ollama installation is needed only when running Datum directly with `npm run chat:host` or when using Ollama outside this project's Docker stack.
+
+- **macOS:** download the `.dmg` from the [official Ollama download page](https://ollama.com/download), move Ollama to Applications, and launch it. macOS 14 or newer is required.
+- **Windows:** download and run `OllamaSetup.exe` from the [official Ollama download page](https://ollama.com/download/windows). Ollama starts in the background and exposes its API on port `11434`.
+- **Linux:** install and start Ollama with:
+
+  ```bash
+  curl -fsSL https://ollama.com/install.sh | sh
+  ollama serve
+  ```
+
+In another terminal, pull a tool-capable model and verify the installation:
+
+```bash
+ollama pull qwen3:8b
+curl http://127.0.0.1:11434/api/tags
+```
+
+For host mode, use this model configuration:
+
+```dotenv
+MODEL_PROVIDER=ollama
+MODEL_NAME=qwen3:8b
+MODEL_API_KEY=
+MODEL_BASE_URL=http://127.0.0.1:11434/v1
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+```
+
+Then start Datum with `npm run chat:host`. Native Ollama is recommended on macOS when model performance matters because it can use Apple Metal acceleration; the Docker Desktop container cannot use the Mac GPU.
+
 Backend installation sources:
 
 - [cjio](https://github.com/cityjson/cjio)
@@ -472,7 +499,7 @@ Do not include API keys, database passwords, private CityJSON datasets, generate
 
 ## Next
 
-- [ ] Add explicit Ollama setup and model presets for local models.
+- [x] Add explicit Ollama setup and model presets for local models.
 - [x] Stream model responses and tool progress to the browser.
 - [x] Add cancellation and progress reporting for long validation and conversion jobs.
 - [x] Add an optional 3D preview for imported and derived datasets.

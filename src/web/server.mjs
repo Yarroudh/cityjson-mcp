@@ -295,6 +295,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const browserId = url.searchParams.get('clientId');
         sendJson(response, 200, {
           ...publicModelState(browserId),
+          ollamaBaseUrl: config.ollamaBaseUrl,
           maxUploadBytes: config.maxUploadBytes,
           maxUploadFiles: config.maxUploadFiles,
           toolCount: gateway.tools.length,
@@ -329,6 +330,73 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const discovered = await discoveryResponse.json();
         const models = (discovered.models || []).map(item => item.name).filter(name => typeof name === 'string');
         sendJson(response, 200, { models });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/models/pull') {
+        const body = await readJson(request, 32 * 1024);
+        const model = typeof body.model === 'string' ? body.model.trim() : '';
+        if (!model || model.length > 200 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?$/.test(model)) {
+          throw new Error('Enter a valid Ollama model name');
+        }
+        let baseUrl;
+        try { baseUrl = new URL(typeof body.baseUrl === 'string' ? body.baseUrl.trim() : ''); }
+        catch { throw new Error('Enter a valid Ollama base URL'); }
+        if (!['http:', 'https:'].includes(baseUrl.protocol) || baseUrl.username || baseUrl.password) {
+          throw new Error('Ollama base URL must use HTTP(S) and cannot contain credentials');
+        }
+        const pullUrl = `${baseUrl.toString().replace(/\/$/, '').replace(/\/v1$/, '')}/api/pull`;
+        let pullResponse;
+        try {
+          pullResponse = await (dependencies.fetchImpl || fetch)(pullUrl, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: model, stream: true })
+          });
+        } catch {
+          throw new Error(`Could not connect to Ollama at ${baseUrl.origin}. Make sure Ollama is running and reachable from Datum`);
+        }
+        if (!pullResponse.ok) {
+          const pullText = await pullResponse.text();
+          let pullResult;
+          try { pullResult = pullText ? JSON.parse(pullText) : {}; }
+          catch { pullResult = { error: pullText }; }
+          throw new Error(pullResult.error || `Ollama returned ${pullResponse.status} while pulling the model`);
+        }
+        if (!pullResponse.body) throw new Error('Ollama returned no pull progress stream');
+        const emit = beginEventStream(response);
+        const reader = pullResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let completed = false;
+        const relay = line => {
+          if (!line.trim()) return;
+          const event = JSON.parse(line);
+          if (event.error) throw new Error(event.error);
+          const percent = event.total > 0 && Number.isFinite(event.completed)
+            ? Math.round((event.completed / event.total) * 100)
+            : event.status === 'success' ? 100 : 0;
+          emit({ type: 'progress', status: event.status || 'Downloading model', completed: event.completed, total: event.total, percent });
+          if (event.status === 'success') completed = true;
+        };
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) relay(line);
+            if (done) break;
+          }
+          if (buffer.trim()) relay(buffer);
+          if (!completed) throw new Error('Ollama ended the pull before reporting success');
+          emit({ type: 'complete', model });
+        } catch (error) {
+          emit({ type: 'error', error: error.message });
+        } finally {
+          reader.releaseLock();
+          response.end();
+        }
         return;
       }
 

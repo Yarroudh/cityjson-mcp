@@ -60,6 +60,7 @@ export function getWebConfig(env = process.env) {
   return {
     provider,
     service,
+    ollamaBaseUrl: env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434/v1',
     apiKey,
     model,
     baseUrl: env.MODEL_BASE_URL || (provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'),

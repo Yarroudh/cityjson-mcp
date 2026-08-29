@@ -213,8 +213,12 @@ test('HTML versions application assets to prevent cached UI mismatches', async (
     fs.readFile(path.join(projectRoot, 'web', 'index.html'), 'utf8'),
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
-  assert.match(html, /styles\.css\?v=17/);
-  assert.match(html, /app\.js\?v=25/);
+  assert.match(html, /styles\.css\?v=20/);
+  assert.match(html, /app\.js\?v=30/);
+  for (const suggestedModel of ['qwen3:4b', 'llama3.2:3b', 'deepseek-r1:1.5b', 'functiongemma:270m']) {
+    assert.match(html, new RegExp(suggestedModel.replace('.', '\\.')));
+  }
+  assert.doesNotMatch(html, /llama3\.2:1b/);
   assert.match(html, /favicon\.svg\?v=1/);
   assert.match(app, /messageActionButton\('Retry question', MESSAGE_ICONS\.retry/);
   assert.match(app, /messageActionButton\('Copy message', MESSAGE_ICONS\.copy/);
@@ -499,6 +503,15 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   const modelTestRequests = [];
   const fetchImpl = async (url, options) => {
     if (url.endsWith('/api/tags')) return jsonResponse({ models: [{ name: 'qwen3:8b' }, { name: 'gpt-oss:20b' }] });
+    if (url.endsWith('/api/pull')) {
+      const body = JSON.parse(options.body);
+      modelTestRequests.push({ url, body });
+      return new Response([
+        JSON.stringify({ status: 'pulling manifest' }),
+        JSON.stringify({ status: 'downloading', completed: 50, total: 100 }),
+        JSON.stringify({ status: 'success' })
+      ].join('\n'), { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+    }
     const body = JSON.parse(options.body);
     modelTestRequests.push({ url, body });
     if (body.model === 'invalid-model') return jsonResponse({ error: { message: 'Invalid API key or model' } }, 401);
@@ -526,6 +539,18 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   const discoveryResponse = await applicationRequest(app.server, 'GET', '/api/models/discover?provider=ollama&baseUrl=http%3A%2F%2Fhost.docker.internal%3A11434%2Fv1');
   assert.equal(discoveryResponse.status, 200);
   assert.deepEqual(JSON.parse(discoveryResponse.body).models, ['qwen3:8b', 'gpt-oss:20b']);
+
+  const pullResponse = await applicationRequest(app.server, 'POST', '/api/models/pull', {
+    model: 'qwen3:4b',
+    baseUrl: 'http://host.docker.internal:11434/v1'
+  });
+  assert.equal(pullResponse.status, 200);
+  const pullEvents = ndjsonEvents(pullResponse);
+  assert.deepEqual(pullEvents.map(event => event.type), ['progress', 'progress', 'progress', 'complete']);
+  assert.equal(pullEvents[1].percent, 50);
+  assert.equal(pullEvents[2].percent, 100);
+  assert.equal(modelTestRequests.at(-1).url, 'http://host.docker.internal:11434/api/pull');
+  assert.deepEqual(modelTestRequests.at(-1).body, { name: 'qwen3:4b', stream: true });
 
   const rejectedResponse = await applicationRequest(app.server, 'POST', '/api/models', {
     clientId,

@@ -26,7 +26,8 @@ test('README presents Datum first and contains required setup sections', async (
   assert.match(readme, /Google AI Studio/);
   assert.match(readme, /free-tier content may be used to improve its products/);
   assert.match(readme, /### Local models with Ollama/);
-  assert.match(readme, /host\.docker\.internal:11434\/v1/);
+  assert.match(readme, /http:\/\/ollama:11434\/v1/);
+  assert.match(readme, /### Install Ollama manually/);
   assert.ok(readme.indexOf('## Quick start: Datum chat application') < readme.indexOf('## Use the MCP server without Datum'));
 });
 
@@ -57,10 +58,14 @@ test('chat startup checks the local image before pulling and never builds automa
   assert.equal(packageJson.scripts.chat, 'node scripts/start-chat.mjs');
   assert.equal(packageJson.scripts['chat:logs'], 'docker compose -f docker/docker-compose.chat.yml logs -f cityjson-chat');
   assert.equal(packageJson.scripts['chat:stop'], 'docker compose -f docker/docker-compose.chat.yml down');
-  assert.ok(startup.indexOf("['image', 'inspect', image]") < startup.indexOf("['pull', image]"));
+  assert.match(startup, /ollama\/ollama:latest/);
+  assert.ok(startup.indexOf("['image', 'inspect', requiredImage]") < startup.indexOf("['pull', requiredImage]"));
   assert.match(startup, /'up', '-d'/);
   assert.match(startup, /'--no-build'/);
   assert.doesNotMatch(compose, /^\s+build:/m);
+  assert.match(compose, /^  ollama:/m);
+  assert.match(compose, /ollama-models:\/root\/\.ollama/);
+  assert.match(compose, /http:\/\/ollama:11434\/v1/);
   for (const source of ['../src:/app/src:ro', '../web:/app/web:ro', '../resources:/app/resources:ro']) {
     assert.match(compose, new RegExp(source.replaceAll('/', '\\/')));
   }

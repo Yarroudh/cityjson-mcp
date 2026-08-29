@@ -54,11 +54,24 @@ const elements = {
   modelSubmitLabel: document.querySelector('#model-submit-label'),
   modelFormError: document.querySelector('#model-form-error'),
   modelProvider: document.querySelector('#model-provider'),
+  modelNamePicker: document.querySelector('.model-name-picker'),
   modelName: document.querySelector('#model-name'),
-  ollamaModels: document.querySelector('#ollama-models'),
+  ollamaModelOptions: document.querySelector('#ollama-model-options'),
   discoverModels: document.querySelector('#discover-models'),
+  pullModelOpen: document.querySelector('#pull-model-open'),
   modelApiKey: document.querySelector('#model-api-key'),
   modelBaseUrl: document.querySelector('#model-base-url'),
+  ollamaPullDialog: document.querySelector('#ollama-pull-dialog'),
+  ollamaPullForm: document.querySelector('#ollama-pull-form'),
+  ollamaPullClose: document.querySelector('#ollama-pull-close'),
+  ollamaPullCancel: document.querySelector('#ollama-pull-cancel'),
+  ollamaPullName: document.querySelector('#ollama-pull-name'),
+  ollamaPullStatus: document.querySelector('#ollama-pull-status'),
+  ollamaPullStatusText: document.querySelector('#ollama-pull-status-text'),
+  ollamaPullPercent: document.querySelector('#ollama-pull-percent'),
+  ollamaPullProgress: document.querySelector('#ollama-pull-progress'),
+  ollamaPullError: document.querySelector('#ollama-pull-error'),
+  ollamaPullSubmitLabel: document.querySelector('#ollama-pull-submit-label'),
   toolDialog: document.querySelector('#tool-dialog'),
   toolDialogClose: document.querySelector('#tool-dialog-close'),
   toolDialogName: document.querySelector('#tool-dialog-name'),
@@ -100,6 +113,7 @@ let dragDepth = 0;
 let clientId;
 let pendingSuggestion = null;
 let editingModelId = null;
+let ollamaModelNames = [];
 let viewer = null;
 let viewerDatasetId = null;
 let viewerRequest = 0;
@@ -926,7 +940,7 @@ function openModelDialog(model = null) {
   elements.modelDialogTitle.textContent = model ? 'Edit model' : 'Add a model';
   elements.modelDialogIntro.textContent = model
     ? 'Update this model configuration. Leave the API key blank to keep the existing key. Saving runs a brief tool-call test.'
-    : 'Add an Ollama, Anthropic Messages, or OpenAI-compatible model. A brief tool-call test must pass before it is saved. Credentials stay in the running application and are never displayed after saving.';
+    : 'Add an Ollama, Anthropic, or OpenAI model. A brief tool-call test must pass before it is saved. Credentials stay in the running application and are never displayed after saving.';
   elements.modelSubmitLabel.textContent = model ? 'Save changes' : 'Use this model';
   elements.modelFormError.hidden = true;
   elements.modelFormError.textContent = '';
@@ -937,9 +951,66 @@ function openModelDialog(model = null) {
   elements.modelApiKey.placeholder = elements.modelProvider.value === 'ollama' ? 'Not required for local Ollama' : (model ? 'Leave blank to keep the current key' : 'Enter the API key');
   elements.modelBaseUrl.value = model?.baseUrl || (elements.modelProvider.value === 'anthropic'
     ? 'https://api.anthropic.com'
-    : elements.modelProvider.value === 'ollama' ? 'http://host.docker.internal:11434/v1' : 'https://api.openai.com/v1');
+    : elements.modelProvider.value === 'ollama' ? (runtimeConfig?.ollamaBaseUrl || 'http://127.0.0.1:11434/v1') : 'https://api.openai.com/v1');
   elements.discoverModels.hidden = elements.modelProvider.value !== 'ollama';
+  elements.pullModelOpen.hidden = elements.modelProvider.value !== 'ollama';
   elements.modelDialog.showModal();
+  if (elements.modelProvider.value === 'ollama') void discoverOllamaModels();
+}
+
+function closeOllamaModelOptions() {
+  elements.ollamaModelOptions.hidden = true;
+  elements.modelName.setAttribute('aria-expanded', 'false');
+}
+
+function renderOllamaModelOptions(open = true) {
+  const query = elements.modelName.value.trim().toLowerCase();
+  const names = ollamaModelNames.filter(name => !query || name.toLowerCase().includes(query));
+  if (names.length) {
+    elements.ollamaModelOptions.replaceChildren(...names.map(name => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'model-name-option';
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', String(name === elements.modelName.value));
+      option.textContent = name;
+      option.addEventListener('click', () => {
+        elements.modelName.value = name;
+        closeOllamaModelOptions();
+        elements.modelName.focus();
+      });
+      return option;
+    }));
+  } else {
+    const empty = document.createElement('span');
+    empty.className = 'model-name-empty';
+    empty.textContent = ollamaModelNames.length ? 'No matching installed models' : 'No installed models found';
+    elements.ollamaModelOptions.replaceChildren(empty);
+  }
+  const shouldOpen = open && elements.modelProvider.value === 'ollama';
+  elements.ollamaModelOptions.hidden = !shouldOpen;
+  elements.modelName.setAttribute('aria-expanded', String(shouldOpen));
+}
+
+async function discoverOllamaModels() {
+  elements.discoverModels.disabled = true;
+  elements.discoverModels.classList.add('loading');
+  elements.modelFormError.hidden = true;
+  try {
+    const query = new URLSearchParams({ provider: 'ollama', baseUrl: elements.modelBaseUrl.value });
+    const result = await requestJson(`/api/models/discover?${query}`);
+    ollamaModelNames = result.models;
+    if (ollamaModelNames.length === 1 && !elements.modelName.value) elements.modelName.value = ollamaModelNames[0];
+    renderOllamaModelOptions();
+    if (!ollamaModelNames.length) throw new Error('Ollama is reachable, but no models are installed');
+  } catch (error) {
+    closeOllamaModelOptions();
+    elements.modelFormError.textContent = `Could not load Ollama models: ${error.message}`;
+    elements.modelFormError.hidden = false;
+  } finally {
+    elements.discoverModels.disabled = false;
+    elements.discoverModels.classList.remove('loading');
+  }
 }
 
 function closeMenus() {
@@ -1267,10 +1338,12 @@ elements.modelDialog.addEventListener('close', () => {
   editingModelId = null;
   elements.modelApiKey.value = '';
 });
+elements.ollamaPullClose.addEventListener('click', () => elements.ollamaPullDialog.close());
+elements.ollamaPullCancel.addEventListener('click', () => elements.ollamaPullDialog.close());
 elements.toolDialogClose.addEventListener('click', () => elements.toolDialog.close());
 elements.aboutButton.addEventListener('click', () => elements.aboutDialog.showModal());
 elements.aboutDialogClose.addEventListener('click', () => elements.aboutDialog.close());
-for (const dialog of [elements.modelDialog, elements.toolDialog, elements.aboutDialog]) {
+for (const dialog of [elements.modelDialog, elements.ollamaPullDialog, elements.toolDialog, elements.aboutDialog]) {
   dialog.addEventListener('click', event => {
     if (event.target === dialog) dialog.close();
   });
@@ -1279,35 +1352,97 @@ elements.modelProvider.addEventListener('change', () => {
   const defaults = {
     openai: 'https://api.openai.com/v1',
     anthropic: 'https://api.anthropic.com',
-    ollama: 'http://host.docker.internal:11434/v1'
+    ollama: runtimeConfig?.ollamaBaseUrl || 'http://127.0.0.1:11434/v1'
   };
   elements.modelBaseUrl.value = defaults[elements.modelProvider.value];
   const isOllama = elements.modelProvider.value === 'ollama';
   elements.modelApiKey.required = !isOllama && !editingModelId;
   elements.modelApiKey.placeholder = isOllama ? 'Not required for local Ollama' : (editingModelId ? 'Leave blank to keep the current key' : 'Enter the API key');
   elements.discoverModels.hidden = !isOllama;
+  elements.pullModelOpen.hidden = !isOllama;
+  if (isOllama) void discoverOllamaModels();
+  else closeOllamaModelOptions();
 });
-elements.discoverModels.addEventListener('click', async () => {
-  elements.discoverModels.disabled = true;
-  elements.discoverModels.textContent = 'Loading models';
-  elements.modelFormError.hidden = true;
-  try {
-    const query = new URLSearchParams({ provider: 'ollama', baseUrl: elements.modelBaseUrl.value });
-    const result = await requestJson(`/api/models/discover?${query}`);
-    elements.ollamaModels.replaceChildren(...result.models.map(model => {
-      const option = document.createElement('option');
-      option.value = model;
-      return option;
-    }));
-    if (result.models.length === 1 && !elements.modelName.value) elements.modelName.value = result.models[0];
-    if (!result.models.length) throw new Error('Ollama is reachable, but no models are installed');
-  } catch (error) {
-    elements.modelFormError.textContent = `Could not load Ollama models: ${error.message}`;
-    elements.modelFormError.hidden = false;
-  } finally {
-    elements.discoverModels.disabled = false;
-    elements.discoverModels.textContent = 'Load installed Ollama models';
+elements.discoverModels.addEventListener('click', () => discoverOllamaModels());
+elements.pullModelOpen.addEventListener('click', () => {
+  closeOllamaModelOptions();
+  elements.ollamaPullName.value = elements.modelName.value || 'qwen3:8b';
+  elements.ollamaPullStatus.hidden = true;
+  elements.ollamaPullProgress.value = 0;
+  elements.ollamaPullPercent.textContent = '0%';
+  elements.ollamaPullError.hidden = true;
+  for (const suggestion of elements.ollamaPullForm.querySelectorAll('[data-ollama-model]')) {
+    suggestion.classList.toggle('selected', suggestion.dataset.ollamaModel === elements.ollamaPullName.value);
   }
+  elements.ollamaPullDialog.showModal();
+  elements.ollamaPullName.focus();
+  elements.ollamaPullName.select();
+});
+for (const suggestion of elements.ollamaPullForm.querySelectorAll('[data-ollama-model]')) {
+  suggestion.addEventListener('click', () => {
+    elements.ollamaPullName.value = suggestion.dataset.ollamaModel;
+    for (const option of elements.ollamaPullForm.querySelectorAll('[data-ollama-model]')) option.classList.toggle('selected', option === suggestion);
+  });
+}
+elements.ollamaPullName.addEventListener('input', () => {
+  for (const option of elements.ollamaPullForm.querySelectorAll('[data-ollama-model]')) {
+    option.classList.toggle('selected', option.dataset.ollamaModel === elements.ollamaPullName.value.trim());
+  }
+});
+elements.ollamaPullForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const model = elements.ollamaPullName.value.trim();
+  const submit = elements.ollamaPullForm.querySelector('[type="submit"]');
+  submit.disabled = true;
+  elements.ollamaPullCancel.disabled = true;
+  elements.ollamaPullClose.disabled = true;
+  elements.ollamaPullSubmitLabel.textContent = 'Pulling model';
+  elements.ollamaPullStatusText.textContent = `Preparing ${model}`;
+  elements.ollamaPullProgress.value = 0;
+  elements.ollamaPullPercent.textContent = '0%';
+  elements.ollamaPullStatus.hidden = false;
+  elements.ollamaPullError.hidden = true;
+  try {
+    await requestEventStream('/api/models/pull', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, baseUrl: elements.modelBaseUrl.value })
+    }, pullEvent => {
+      if (pullEvent.type !== 'progress') return;
+      const percent = Number.isFinite(pullEvent.percent) ? Math.max(0, Math.min(100, pullEvent.percent)) : 0;
+      elements.ollamaPullProgress.value = percent;
+      elements.ollamaPullProgress.textContent = `${percent}%`;
+      elements.ollamaPullPercent.textContent = `${percent}%`;
+      elements.ollamaPullStatusText.textContent = pullEvent.status || `Downloading ${model}`;
+    });
+    elements.modelName.value = model;
+    elements.ollamaPullDialog.close();
+    await discoverOllamaModels();
+  } catch (error) {
+    elements.ollamaPullError.textContent = `Could not pull ${model}: ${error.message}`;
+    elements.ollamaPullError.hidden = false;
+  } finally {
+    submit.disabled = false;
+    elements.ollamaPullCancel.disabled = false;
+    elements.ollamaPullClose.disabled = false;
+    elements.ollamaPullSubmitLabel.textContent = 'Pull model';
+  }
+});
+elements.modelName.addEventListener('focus', () => {
+  if (elements.modelProvider.value === 'ollama' && ollamaModelNames.length) renderOllamaModelOptions();
+});
+elements.modelName.addEventListener('input', () => {
+  if (elements.modelProvider.value === 'ollama' && ollamaModelNames.length) renderOllamaModelOptions();
+});
+elements.modelName.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeOllamaModelOptions();
+  if (event.key === 'ArrowDown' && !elements.ollamaModelOptions.hidden) {
+    event.preventDefault();
+    elements.ollamaModelOptions.querySelector('.model-name-option')?.focus();
+  }
+});
+document.addEventListener('click', event => {
+  if (!elements.modelNamePicker.contains(event.target)) closeOllamaModelOptions();
 });
 elements.modelForm.addEventListener('submit', async event => {
   event.preventDefault();

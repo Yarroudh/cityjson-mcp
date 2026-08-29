@@ -1,4 +1,15 @@
 services:
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   cityjson-chat:
     image: ${CITYJSON_MCP_IMAGE:-yarroudh/cityjson-mcp:latest}
     entrypoint: ["node", "/app/src/web/server.mjs"]
@@ -10,6 +21,10 @@ services:
       CITYJSON_MCP_INPUT: /input
       CITYJSON_MCP_WORKSPACE: /data/.cityjson-mcp-workspace
       CITYJSON_MCP_ALLOWED_ROOTS: /data
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434/v1}
+    depends_on:
+      ollama:
+        condition: service_healthy
     ports:
       - "127.0.0.1:3000:3000"
     extra_hosts:
@@ -28,3 +43,4 @@ services:
 volumes:
   cityjson-input:
   cityjson-data:
+  ollama-models:
