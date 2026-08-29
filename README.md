@@ -350,14 +350,15 @@ Add the `/input` mount shown above when the server must read local files.
 
 ---
 
-## File and dataset handling
+## Architecture
 
+```mermaid
 flowchart LR
   CLIENT["Clients"]
   BROWSER["Interface"]
   CHAT["Host<br/>model control<br/>tool client"]
   MODEL["Model"]
-  INPUT["Input<br/>streamed data"]
+  INPUT["Input<br/>streamed city data"]
 
   SERVER["Server"]
   CORE["Data manager<br/>handles<br/>access rules"]
@@ -389,15 +390,7 @@ flowchart LR
   CORE --> CJDB
 
   SERVER --> KNOW
-
-- Datum streams browser attachments to the MCP input directory and calls `cityjson_import` automatically.
-- Standalone MCP clients use a mounted `/input` directory.
-- `cityjson_import` copies a source file into the managed workspace and returns a `dataset_id`.
-- `cityjson_open` opens an authorized server-visible path.
-- `cityjson_import_text` accepts small CityJSON documents supplied as text.
-- `cityjson_download` returns a source or derived dataset.
-- Dataset handles remain valid only while the MCP server process is running.
-- Derived files remain in the managed workspace until they are deleted externally.
+```
 
 ---
 
