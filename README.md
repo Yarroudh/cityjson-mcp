@@ -31,7 +31,7 @@ The following video is a demo of Datum, the chat application in this repository.
 
 ## Quick start: Datum chat application
 
-Datum is the main application in this repository. It accepts CityJSON attachments in the browser, imports them through MCP, and lets a configured model call the CityJSON tools.
+Datum is the official AI client provided with CityJSON MCP toolbox. It accepts CityJSON attachments in the browser, and lets a configured LLM model call the CityJSON tools to process datasets and answer user questions.
 
 ### Requirements
 
