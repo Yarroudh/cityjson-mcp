@@ -97,6 +97,8 @@ The following video is a demo of Datum, the chat application in this repository.
 
 Datum is the official AI client provided with CityJSON MCP toolbox. It accepts CityJSON attachments in the browser, and lets a configured LLM model call the CityJSON tools to process datasets and answer user questions.
 
+For a complete visual tour of the interface and its behavior, see the [Datum guide](docs/Datum.md).
+
 ### Requirements
 
 - Docker Desktop or Docker Engine with Docker Compose.

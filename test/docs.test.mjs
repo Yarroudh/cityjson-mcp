@@ -69,6 +69,28 @@ test('detailed tool reference documents every registered MCP tool exactly once',
   assert.match(reference, /how it works/i);
 });
 
+test('wiki documentation includes Home, Datum, and every supplied Datum screenshot', async () => {
+  const [home, datum] = await Promise.all([
+    fs.readFile(path.join(root, 'docs', 'Home.md'), 'utf8'),
+    fs.readFile(path.join(root, 'docs', 'Datum.md'), 'utf8')
+  ]);
+  assert.match(home, /\[Datum guide\]\(Datum\)/);
+  assert.match(home, /\[CityJSON MCP tools reference\]\(CityJSON-MCP-Tools\)/);
+  for (const filename of [
+    'datum-import.png',
+    'datum-conversation.png',
+    'datum-tools.png',
+    'datum-tool-details.png',
+    'datum-viewer.png',
+    'datum-models.png',
+    'datum-add-model.png'
+  ]) {
+    assert.match(datum, new RegExp(`assets/${filename.replaceAll('.', '\\.')}`));
+    await fs.access(path.join(root, 'docs', 'assets', filename));
+  }
+  assert.doesNotMatch(datum, /datum-about/i);
+});
+
 test('chat startup checks the local image before pulling and never builds automatically', async () => {
   const [packageText, startup, compose] = await Promise.all([
     fs.readFile(path.join(root, 'package.json'), 'utf8'),
