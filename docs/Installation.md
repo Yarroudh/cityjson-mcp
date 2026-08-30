@@ -155,7 +155,7 @@ When `npm run chat` detects native Ollama on macOS, it connects the Datum contai
 npm run chat
 ```
 
-Open `http://127.0.0.1:3000`.
+Open `http://127.0.0.1:3000`, or the port set by `CHAT_PORT` in `.env`.
 
 The launcher:
 
@@ -212,7 +212,7 @@ The Compose project uses three volumes:
 
 `npm run chat:stop` stops the containers without deleting these volumes.
 
-Datum binds only to `127.0.0.1:3000` by default. Ollama is not published on a host port when the bundled container is used. The Compose network allows Datum to reach it internally.
+Datum binds only to `127.0.0.1:3000` by default. Set `CHAT_PORT` in `.env` to change both the host-published port and Datum's container port. Ollama is not published on a host port when the bundled container is used. The Compose network allows Datum to reach it internally.
 
 Remote URL import and the live specification, schema, and extension tools require outbound HTTPS access from the MCP process. Local inspection, transformation, and bundled schema outline tools do not require that network access.
 
@@ -624,7 +624,13 @@ Check network access, Docker registry access, disk space, and the image name. Bu
 
 ### Port 3000 is already in use
 
-Stop the process using the port or change `CHAT_PORT` for direct host mode. The current Compose file publishes port 3000 explicitly, so changing the Compose port mapping is required for Docker mode.
+Stop the process using the port or set another port in `.env`, then restart Datum:
+
+```dotenv
+CHAT_PORT=3001
+```
+
+The setting applies to both direct host mode and Docker Compose.
 
 ### A model API key is rejected
 

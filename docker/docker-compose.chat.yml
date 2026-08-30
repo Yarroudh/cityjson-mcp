@@ -20,6 +20,7 @@ services:
         required: false
     environment:
       CHAT_HOST: 0.0.0.0
+      CHAT_PORT: ${CHAT_PORT:-3000}
       CITYJSON_MCP_INPUT: /input
       CITYJSON_MCP_WORKSPACE: /data/.cityjson-mcp-workspace
       CITYJSON_MCP_ALLOWED_ROOTS: /data
@@ -29,7 +30,7 @@ services:
       ollama:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${CHAT_PORT:-3000}:${CHAT_PORT:-3000}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

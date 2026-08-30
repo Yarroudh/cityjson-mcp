@@ -159,6 +159,8 @@ test('chat startup checks the local image before pulling and never builds automa
   assert.match(compose, /ollama-models:\/root\/\.ollama/);
   assert.match(compose, /http:\/\/ollama:11434\/v1/);
   assert.match(compose, /OLLAMA_CONTEXT_LENGTH.*16384/);
+  assert.match(compose, /CHAT_PORT:\s+\$\{CHAT_PORT:-3000\}/);
+  assert.match(compose, /127\.0\.0\.1:\$\{CHAT_PORT:-3000\}:\$\{CHAT_PORT:-3000\}/);
   for (const source of ['../src:/app/src:ro', '../web:/app/web:ro', '../resources:/app/resources:ro']) {
     assert.match(compose, new RegExp(source.replaceAll('/', '\\/')));
   }

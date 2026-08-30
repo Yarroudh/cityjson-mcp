@@ -67,7 +67,7 @@ npm run chat
 
 The launcher starts cloud-only by default unless `MODEL_PROVIDER=ollama`. Use `npm run chat -- --with-ollama` to add the Ollama companion or `npm run chat -- --without-ollama` to force cloud-only startup. The selected mode is printed before any image pull.
 
-Open <http://127.0.0.1:3000>. The application streams attachments into `/input`, calls `cityjson_import` over MCP, and sends only the returned dataset handle to the model.
+Open <http://127.0.0.1:3000>, or the port configured with `CHAT_PORT` in `.env`. The application streams attachments into `/input`, calls `cityjson_import` over MCP, and sends only the returned dataset handle to the model.
 
 Configure the model from the page, or optionally provide a default with `MODEL_PROVIDER`, `MODEL_NAME`, `MODEL_API_KEY`, and `MODEL_BASE_URL` in the repository `.env`.
 

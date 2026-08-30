@@ -260,7 +260,7 @@ Model names and availability change. Confirm the exact model identifier in the p
 npm run chat
 ```
 
-Open <http://127.0.0.1:3000>.
+Open <http://127.0.0.1:3000>, or the port set by `CHAT_PORT` in `.env`.
 
 The command starts the container in detached mode and returns to the terminal. Use these commands to view logs or stop the application:
 
@@ -277,7 +277,7 @@ npm run chat:stop
 4. Check whether the CityJSON MCP image exists and pull it when missing.
 5. Start Datum and, when selected, its Ollama companion in detached mode without building an image.
 
-The application binds to `127.0.0.1:3000`. Docker volumes store imported files, derived datasets, and downloaded Ollama models. Ollama is available only to the internal Compose network and is not published on a host port.
+The application binds to `127.0.0.1:${CHAT_PORT:-3000}`. Set `CHAT_PORT` in `.env` before starting Datum to change both the published Docker port and the application port. Docker volumes store imported files, derived datasets, and downloaded Ollama models. Ollama is available only to the internal Compose network and is not published on a host port.
 
 ### Optional: build the image locally
 
