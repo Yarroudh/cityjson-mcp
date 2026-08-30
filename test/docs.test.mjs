@@ -24,8 +24,14 @@ test('README presents Datum first and contains required setup sections', async (
   assert.match(readme, /## Next/);
   assert.match(readme, /gemini-3\.7-flash/);
   assert.match(readme, /Google AI Studio/);
-  assert.match(readme, /free-tier content may be used to improve its products/);
+  assert.match(readme, /MODEL_NAME=openrouter\/free/);
+  assert.match(readme, /paid Gemini or DeepSeek/i);
   assert.match(readme, /### Local models with Ollama/);
+  assert.match(readme, /### Cloud model providers/);
+  assert.match(readme, /MODEL_PROVIDER=openrouter/);
+  assert.doesNotMatch(readme, /MODEL_PROVIDER=opencode/);
+  assert.doesNotMatch(readme, /MODEL_PROVIDER=zai/);
+  assert.match(readme, /MODEL_NAME=gpt-5-nano/);
   assert.match(readme, /http:\/\/ollama:11434\/v1/);
   assert.match(readme, /### Install Ollama manually/);
   assert.match(readme, /OLLAMA_CONTEXT_LENGTH/);
@@ -33,10 +39,10 @@ test('README presents Datum first and contains required setup sections', async (
   assert.ok(readme.indexOf('## Quick start: Datum chat application') < readme.indexOf('## Use the MCP server without Datum'));
 });
 
-test('README does not contain diagram sections or embedded diagrams', async () => {
+test('README documents the architecture with an inline diagram', async () => {
   const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8');
-  assert.doesNotMatch(readme, /^#+\s+Diagrams?\s*$/im);
-  assert.doesNotMatch(readme, /```mermaid/);
+  assert.match(readme, /^## Architecture$/m);
+  assert.match(readme, /```mermaid/);
   assert.doesNotMatch(readme, /diagrams\//);
 });
 
@@ -62,6 +68,10 @@ test('chat startup checks the local image before pulling and never builds automa
   assert.equal(packageJson.scripts['chat:stop'], 'docker compose -f docker/docker-compose.chat.yml down');
   assert.match(startup, /ollama\/ollama:latest/);
   assert.match(startup, /nativeOllamaAvailable/);
+  assert.match(startup, /CHAT_ENABLE_OLLAMA/);
+  assert.match(startup, /--with-ollama/);
+  assert.match(startup, /--without-ollama/);
+  assert.match(startup, /Ollama is disabled; starting Datum with cloud-model support only/);
   assert.match(startup, /host\.docker\.internal:11434\/v1/);
   assert.ok(startup.indexOf("['image', 'inspect', requiredImage]") < startup.indexOf("['pull', requiredImage]"));
   assert.match(startup, /'up', '-d'/);

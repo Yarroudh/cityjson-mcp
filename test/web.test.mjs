@@ -79,6 +79,18 @@ test('provider selects an API style while model vendor and base URL remain indep
   assert.equal(config.baseUrl, 'https://api.deepseek.com');
 });
 
+test('OpenRouter uses the OpenAI-compatible adapter and its provider key', () => {
+  const openrouter = getWebConfig({
+    MODEL_PROVIDER: 'openrouter',
+    MODEL_NAME: 'z-ai/glm-5.2:free',
+    OPENROUTER_API_KEY: 'openrouter-secret'
+  });
+  assert.equal(openrouter.provider, 'openai');
+  assert.equal(openrouter.service, 'openrouter');
+  assert.equal(openrouter.apiKey, 'openrouter-secret');
+  assert.equal(openrouter.baseUrl, 'https://openrouter.ai/api/v1');
+});
+
 test('ollama uses the OpenAI adapter without requiring a local API key', () => {
   const config = getWebConfig({
     MODEL_PROVIDER: 'ollama',
@@ -134,7 +146,7 @@ test('provider rejects values that are not supported API styles', () => {
     MODEL_PROVIDER: 'deepseek',
     MODEL_NAME: 'deepseek-v4-pro',
     MODEL_API_KEY: 'test'
-  }), /MODEL_PROVIDER must be anthropic, openai, or ollama/);
+  }), /MODEL_PROVIDER must be one of:.*openrouter.*openai.*anthropic/);
 });
 
 test('chat host can start its configuration flow without model credentials', () => {
@@ -189,6 +201,33 @@ test('model connection validation rejects a response without the required tool c
   await assert.rejects(client.testConnection(), /did not complete the required tool-call test/);
 });
 
+test('OpenRouter connection validation explains free-model rate limits', async () => {
+  const client = createModelClient({
+    provider: 'openai', service: 'openrouter', apiKey: 'test', model: 'z-ai/glm-5.2:free',
+    baseUrl: 'https://openrouter.ai/api/v1', maxOutputTokens: 100, maxToolRounds: 3, temperature: 0.1
+  }, async () => jsonResponse({ error: { message: 'Provider returned error' } }, 429));
+  await assert.rejects(client.testConnection(), /accepted the API key.*rate-limited.*openrouter\/free/i);
+});
+
+test('direct OpenAI models use current Chat Completions options for GPT Nano', async () => {
+  let request;
+  const client = createModelClient({
+    provider: 'openai', service: 'openai', apiKey: 'test', model: 'gpt-5-nano', baseUrl: 'https://api.openai.com/v1',
+    maxOutputTokens: 4096, maxToolRounds: 3, temperature: 0.1
+  }, async (url, options) => {
+    request = { url, body: JSON.parse(options.body) };
+    return jsonResponse({ choices: [{ message: { tool_calls: [{
+      id: 'call-1', type: 'function', function: { name: 'datum_connection_test', arguments: '{"status":"ok"}' }
+    }] } }] });
+  });
+  await client.testConnection();
+  assert.equal(request.url, 'https://api.openai.com/v1/chat/completions');
+  assert.equal(request.body.max_completion_tokens, 512);
+  assert.equal('max_tokens' in request.body, false);
+  assert.equal('temperature' in request.body, false);
+  assert.equal(request.body.tool_choice.function.name, 'datum_connection_test');
+});
+
 test('ollama connection validation uses deterministic model capabilities', async () => {
   const requests = [];
   const client = createModelClient({
@@ -223,7 +262,10 @@ test('HTML versions application assets to prevent cached UI mismatches', async (
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
   assert.match(html, /styles\.css\?v=22/);
-  assert.match(html, /app\.js\?v=32/);
+  assert.match(html, /app\.js\?v=37/);
+  assert.match(html, /value="openrouter"/);
+  assert.doesNotMatch(html, /value="opencode"/);
+  assert.doesNotMatch(html, /value="zai"/);
   assert.match(html, /id="model-delete-dialog"/);
   assert.match(html, /id="ollama-context-note"/);
   assert.doesNotMatch(app, /window\.confirm/);
@@ -263,22 +305,28 @@ test('primary controls and muted text meet readable contrast in both themes', as
   }
 });
 
-test('user model configuration changes API settings without requiring the existing key again', () => {
+test('user model configuration keeps a key only while editing the same provider', () => {
   const base = getWebConfig({
     MODEL_PROVIDER: 'openai',
     MODEL_NAME: 'default-model',
     MODEL_API_KEY: 'existing-secret'
   });
   const selected = configuredModel(base, {
-    provider: 'anthropic',
-    model: 'claude-test',
+    provider: 'openai',
+    model: 'gpt-5-nano',
     apiKey: '',
-    baseUrl: 'https://api.anthropic.com/'
+    baseUrl: 'https://api.openai.com/v1/'
   });
-  assert.equal(selected.provider, 'anthropic');
-  assert.equal(selected.model, 'claude-test');
-  assert.equal(selected.baseUrl, 'https://api.anthropic.com');
+  assert.equal(selected.provider, 'openai');
+  assert.equal(selected.model, 'gpt-5-nano');
+  assert.equal(selected.baseUrl, 'https://api.openai.com/v1');
   assert.equal(selected.apiKey, 'existing-secret');
+  assert.throws(() => configuredModel(base, {
+    provider: 'anthropic', model: 'claude-test', apiKey: '', baseUrl: 'https://api.anthropic.com'
+  }), /Enter a valid API key/);
+  assert.throws(() => configuredModel(base, {
+    provider: 'openai', model: 'gpt-5-nano', apiKey: '', baseUrl: 'https://untrusted.example/v1'
+  }), /Enter a valid API key/);
 });
 
 test('chat startup refuses to advertise a toolbox whose backends are unavailable', async t => {
@@ -516,6 +564,11 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   const modelTestRequests = [];
   const fetchImpl = async (url, options) => {
     if (url.endsWith('/api/tags')) return jsonResponse({ models: [{ name: 'qwen3:8b' }, { name: 'gpt-oss:20b' }] });
+    if (url.includes('/models?supported_parameters=tools')) return jsonResponse({ data: [
+      { id: 'z-ai/glm-free', name: 'GLM Free', context_length: 200000, pricing: { prompt: '0', completion: '0' }, supported_parameters: ['tools', 'tool_choice'] },
+      { id: 'text-only', name: 'Text only', pricing: { prompt: '0', completion: '0' }, supported_parameters: ['temperature'] },
+      { id: 'openai/gpt-paid', name: 'GPT Paid', pricing: { prompt: '0.1', completion: '0.2' }, supported_parameters: ['tools'] }
+    ] });
     if (url.endsWith('/api/pull')) {
       const body = JSON.parse(options.body);
       modelTestRequests.push({ url, body });
@@ -552,6 +605,20 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
   const discoveryResponse = await applicationRequest(app.server, 'GET', '/api/models/discover?provider=ollama&baseUrl=http%3A%2F%2Fhost.docker.internal%3A11434%2Fv1');
   assert.equal(discoveryResponse.status, 200);
   assert.deepEqual(JSON.parse(discoveryResponse.body).models, ['qwen3:8b', 'gpt-oss:20b']);
+
+  const cloudDiscoveryResponse = await applicationRequest(app.server, 'POST', '/api/models/discover', {
+    clientId,
+    provider: 'openrouter',
+    apiKey: 'openrouter-secret',
+    baseUrl: 'https://openrouter.ai/api/v1'
+  });
+  assert.equal(cloudDiscoveryResponse.status, 200);
+  const cloudModels = JSON.parse(cloudDiscoveryResponse.body).models;
+  assert.deepEqual(cloudModels.map(model => model.id), ['openrouter/free', 'z-ai/glm-free', 'openai/gpt-paid']);
+  assert.equal(cloudModels[0].isFree, true);
+  assert.equal(cloudModels[0].isRecommended, true);
+  assert.equal(cloudModels[1].isFree, true);
+  assert.equal(cloudModels[2].isFree, false);
 
   const pullResponse = await applicationRequest(app.server, 'POST', '/api/models/pull', {
     model: 'qwen3:4b',
@@ -597,7 +664,7 @@ test('chat API adds, edits, selects, and deletes model profiles and downloads im
     clientId,
     provider: 'openai',
     model: 'edited-model',
-    apiKey: '',
+    apiKey: 'openai-secret',
     baseUrl: 'https://example.test/v1'
   });
   assert.equal(editedResponse.status, 200);

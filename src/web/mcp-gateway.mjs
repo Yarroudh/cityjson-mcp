@@ -6,7 +6,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 function childEnvironment() {
-  const modelSecrets = new Set(['MODEL_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']);
+  const modelSecrets = new Set(['MODEL_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY']);
   return {
     ...Object.fromEntries(Object.entries(process.env).filter(([key, value]) => typeof value === 'string' && !modelSecrets.has(key))),
     CITYJSON_MCP_WEB_HOST: '1'

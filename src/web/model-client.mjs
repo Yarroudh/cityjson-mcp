@@ -28,6 +28,16 @@ function ollamaApiUrl(baseUrl, pathname) {
   return `${baseUrl.replace(/\/$/, '').replace(/\/v1$/, '')}${pathname}`;
 }
 
+function usesModernOpenAIChat(config) {
+  return config.service === 'openai' && /^(?:gpt-5(?:[.-]|$)|o[1-9](?:[.-]|$))/i.test(config.model);
+}
+
+function openAIRequestOptions(config, maxOutputTokens) {
+  return usesModernOpenAIChat(config)
+    ? { max_completion_tokens: maxOutputTokens }
+    : { max_tokens: maxOutputTokens, temperature: config.temperature ?? 0.1 };
+}
+
 async function fetchJson(fetchImpl, url, options) {
   const response = await fetchImpl(url, options);
   const text = await response.text();
@@ -332,30 +342,39 @@ class OpenAIModelClient {
         return { rating: 'limited', detail: 'Supports tools but the Datum tool-call evaluation did not complete' };
       }
     }
-    const response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), {
-      method: 'POST',
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: this.config.model,
-        messages: [{ role: 'user', content: `Call ${CONNECTION_TEST_TOOL_NAME} with status set to ok.` }],
-        tools: [{
-          type: 'function',
-          function: {
-            name: CONNECTION_TEST_TOOL_NAME,
-            description: 'Confirm that this model configuration supports tool calls.',
-            parameters: CONNECTION_TEST_PARAMETERS
-          }
-        }],
-        tool_choice: 'auto',
-        max_tokens: Math.min(this.config.maxOutputTokens, 64),
-        temperature: this.config.temperature ?? 0.1,
-        stream: false
-      })
-    });
+    let response;
+    try {
+      response = await fetchJson(this.fetch, apiUrl(this.config.baseUrl, '/chat/completions'), {
+        method: 'POST',
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${this.config.apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.config.model,
+          messages: [{ role: 'user', content: `Call ${CONNECTION_TEST_TOOL_NAME} with status set to ok.` }],
+          tools: [{
+            type: 'function',
+            function: {
+              name: CONNECTION_TEST_TOOL_NAME,
+              description: 'Confirm that this model configuration supports tool calls.',
+              parameters: CONNECTION_TEST_PARAMETERS
+            }
+          }],
+          tool_choice: usesModernOpenAIChat(this.config)
+            ? { type: 'function', function: { name: CONNECTION_TEST_TOOL_NAME } }
+            : 'auto',
+          ...openAIRequestOptions(this.config, Math.min(this.config.maxOutputTokens, 512)),
+          stream: false
+        })
+      });
+    } catch (error) {
+      if (this.config.service === 'openrouter' && /Model API returned 429:/i.test(error.message)) {
+        throw new Error('OpenRouter accepted the API key, but the selected model is rate-limited or its free provider has no capacity. Try again later, choose another free model, or use openrouter/free.');
+      }
+      throw error;
+    }
     const calls = response.choices?.[0]?.message?.tool_calls;
     const accepted = calls?.some(item => item.type === 'function' && item.function?.name === CONNECTION_TEST_TOOL_NAME);
     if (!accepted) throw new Error('The model responded, but it did not complete the required tool-call test');
@@ -382,11 +401,10 @@ class OpenAIModelClient {
         },
         body: JSON.stringify({
           model: this.config.model,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+          messages: [{ role: usesModernOpenAIChat(this.config) ? 'developer' : 'system', content: SYSTEM_PROMPT }, ...messages],
           tools,
           tool_choice: requireTextResponse ? 'none' : 'auto',
-          max_tokens: this.config.maxOutputTokens,
-          temperature: this.config.temperature ?? 0.1,
+          ...openAIRequestOptions(this.config, this.config.maxOutputTokens),
           stream: Boolean(onEvent)
         })
       };

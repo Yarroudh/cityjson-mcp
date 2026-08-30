@@ -31,7 +31,11 @@ The Docker image includes:
   - [Requirements](#requirements)
   - [1. Install the JavaScript dependencies](#1-install-the-javascript-dependencies)
   - [2. Create `.env`](#2-create-env)
-    - [Free model for testing](#free-model-for-testing)
+    - [Cloud model providers](#cloud-model-providers)
+      - [Recommended free cloud models through OpenRouter](#recommended-free-cloud-models-through-openrouter)
+      - [OpenAI GPT Nano](#openai-gpt-nano)
+      - [Other OpenAI-compatible providers](#other-openai-compatible-providers)
+    - [Recommended cloud configurations](#recommended-cloud-configurations)
     - [Local models with Ollama](#local-models-with-ollama)
     - [Other model services](#other-model-services)
   - [3. Start Datum](#3-start-datum)
@@ -45,6 +49,7 @@ The Docker image includes:
   - [VS Code](#vs-code)
   - [Other MCP clients](#other-mcp-clients)
 - [File and dataset handling](#file-and-dataset-handling)
+- [Architecture](#architecture)
 - [Tool catalog](#tool-catalog)
   - [Dataset management and inspection](#dataset-management-and-inspection)
   - [Validation](#validation)
@@ -96,7 +101,7 @@ Datum is the official AI client provided with CityJSON MCP toolbox. It accepts C
 
 - Docker Desktop or Docker Engine with Docker Compose.
 - Node.js 20 or newer.
-- (optional) An API key for a model that supports tool calls.
+- An API key for a cloud model that supports tool calls, or a local Ollama model.
 
 > Datum supports local Ollama models. However, for optimal performance and reliability, we recommend using a cloud model. Local models may encounter memory constraints, particularly with larger workloads, and have not yet been extensively tested.
 
@@ -117,10 +122,10 @@ cp .env.example .env
 Set these values before starting Datum:
 
 ```dotenv
-MODEL_PROVIDER=openai
-MODEL_NAME=gemini-3.7-flash
-MODEL_API_KEY=replace-with-your-api-key
-MODEL_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+MODEL_PROVIDER=openrouter
+MODEL_NAME=openrouter/free
+MODEL_API_KEY=replace-with-your-openrouter-api-key
+MODEL_BASE_URL=https://openrouter.ai/api/v1
 MODEL_TEMPERATURE=0.1
 ```
 
@@ -128,46 +133,77 @@ The model settings mean:
 
 | Variable | Required | Description |
 |---|---:|---|
-| `MODEL_PROVIDER` | yes | Model API selection: `openai`, `anthropic`, or `ollama`. Ollama uses the OpenAI Chat Completions format internally. |
-| `MODEL_NAME` | yes | Exact model identifier sent to the provider, for example `gemini-3.7-flash`. The model must support tool calls. |
-| `MODEL_API_KEY` | except Ollama | API credential issued by the model provider. Local Ollama needs no key. |
+| `MODEL_PROVIDER` | yes | Model service: `ollama`, `openrouter`, `openai`, or `anthropic`. Ollama, OpenRouter, and OpenAI-compatible services use the OpenAI Chat Completions format internally. |
+| `MODEL_NAME` | yes | Exact model identifier sent to the provider, for example `openrouter/free`. The model must support tool calls. |
+| `MODEL_API_KEY` | except Ollama | API credential issued by the model provider. Local Ollama needs no key. Do not commit `.env`. |
 | `MODEL_BASE_URL` | yes | Base URL for the provider API. |
 | `MODEL_TEMPERATURE` | no | Sampling temperature. Datum defaults to `0.1`. |
 | `OLLAMA_CONTEXT_LENGTH` | no | Ollama context window in tokens. Defaults to `16384`; larger values use more RAM or VRAM. |
 
 The `.env` model is the default model in Datum. Users can add other models from the model menu in the UI. Models added through the interface remain in server memory for up to eight hours. Their API keys are not returned to the browser or passed to MCP tools.
 
-#### Free model for testing
+#### Cloud model providers
 
-Gemini 3.7 Flash is the recommended model for initial testing. Google lists free input and output tokens for this model on the Gemini API free tier. The free tier has rate limits, availability depends on region, and Google states that free-tier content may be used to improve its products. Do not send confidential datasets through a free-tier account without reviewing the provider's data terms.
+Datum supports OpenRouter, OpenAI-compatible APIs, and Anthropic as cloud providers. Credentials stay in the running application and are not passed to MCP tools. Datum runs a live tool-call check before accepting any model because catalog metadata alone does not guarantee reliable agent behavior.
 
-Create and configure a Gemini API key:
+##### Recommended free cloud models through OpenRouter
 
-1. Open the [Google AI Studio API Keys page](https://aistudio.google.com/app/apikey). Google's [API key guide](https://ai.google.dev/gemini-api/docs/api-key) explains project and key management.
-2. Sign in and accept the Gemini API terms if prompted.
-3. Select **Create API key**. New keys created in AI Studio are restricted to the Gemini API.
-4. Copy the key.
-5. Create `.env` from `.env.example` and set:
+Create an [OpenRouter API key](https://openrouter.ai/settings/keys), choose **OpenRouter (cloud catalog)** in Datum, and paste the key. Select **Free Models Router** at the top of the refreshed catalog. It uses the stable `openrouter/free` ID and automatically selects an available free model compatible with requested features such as tool calling.
 
-   ```dotenv
-   MODEL_PROVIDER=openai
-   MODEL_NAME=gemini-3.7-flash
-   MODEL_API_KEY=paste-your-gemini-api-key-here
-   MODEL_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-   MODEL_TEMPERATURE=0.1
-   ```
+To make it the default:
 
-6. Run `npm run chat`, open <http://127.0.0.1:3000>, import a CityJSON file, and select one of the suggested questions or enter your own prompt.
+```dotenv
+MODEL_PROVIDER=openrouter
+MODEL_NAME=openrouter/free
+MODEL_API_KEY=paste-your-openrouter-key-here
+MODEL_BASE_URL=https://openrouter.ai/api/v1
+MODEL_TEMPERATURE=0.1
+```
 
-The base URL above is Google's documented [OpenAI compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai), which is why `MODEL_PROVIDER` remains `openai`.
+This is Datum's recommended free-cloud configuration. It avoids depending on one free provider's capacity, but the selected model can vary between calls. Free usage is intended for experimentation and low-volume work, is rate-limited, and may be less predictable than paid inference. You can still select a specific `:free` model when model consistency matters more than automatic availability.
 
-Check the [Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricing) and [rate-limit documentation](https://ai.google.dev/gemini-api/docs/rate-limits) because free-tier quotas can change.
+##### OpenAI GPT Nano
+
+Use the OpenAI choice with an API key:
+
+```dotenv
+MODEL_PROVIDER=openai
+MODEL_NAME=gpt-5-nano
+MODEL_API_KEY=paste-your-openai-api-key-here
+MODEL_BASE_URL=https://api.openai.com/v1
+```
+
+GPT-5 Nano supports function calling but the OpenAI API does not provide it on the free usage tier. It is inexpensive and useful for testing, although a stronger coding model may be more reliable for long CityJSON tool workflows.
+
+##### Other OpenAI-compatible providers
+
+For any service exposing an OpenAI-compatible Chat Completions endpoint, choose **OpenAI-compatible API**, then enter the provider's exact model ID, API key, and base URL. This covers services such as Gemini and DeepSeek without hard-coding a changing provider directory. Services requiring a different protocol, OAuth flow, or custom request headers are not automatically compatible.
+
+`MODEL_API_KEY` takes precedence for the default model. Datum also recognizes `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` for their matching `MODEL_PROVIDER`. All of these model credentials are removed from the environment passed to the MCP subprocess.
+
+#### Recommended cloud configurations
+
+For free experimentation, use `openrouter/free` as shown above. OpenRouter chooses a currently available free model and filters for capabilities required by the request. Its free tier has limited request quotas and free-provider capacity can fluctuate.
+
+For the best reliability and more demanding CityJSON tool workflows, use a paid Gemini or DeepSeek model through its OpenAI-compatible endpoint. Choose **OpenAI / compatible API** in Datum and enter the provider's model ID, API key, and base URL. Paid models avoid the tight shared-capacity limits of free endpoints and keep the model stable throughout a conversation.
+
+Google API keys are managed in [Google AI Studio](https://aistudio.google.com/app/apikey); see Google's [OpenAI compatibility guide](https://ai.google.dev/gemini-api/docs/openai) and [pricing](https://ai.google.dev/gemini-api/docs/pricing). For DeepSeek, use its [API documentation and pricing](https://api-docs.deepseek.com/quick_start/pricing/). Review each provider's data policy before sending confidential CityJSON datasets.
 
 #### Local models with Ollama
 
-No separate Ollama installation is required for the Docker quick start. `npm run chat` automatically downloads the official Ollama image when needed, starts it beside Datum, and keeps downloaded models in a persistent Docker volume. 
+Ollama is an optional companion service. A normal `npm run chat` enables it automatically only when `.env` has `MODEL_PROVIDER=ollama`. Cloud-model configurations start Datum without inspecting, pulling, or starting the Ollama image. The launcher prints the selected mode before it checks Docker images.
 
-> On `macOS`, it first looks for Ollama running natively at `127.0.0.1:11434` and uses it when available so models can use `Apple Metal` acceleration; otherwise it falls back to the bundled Docker service.
+Override the automatic choice when needed:
+
+```bash
+# Keep Ollama available alongside a cloud default
+npm run chat -- --with-ollama
+
+# Start only Datum, even if .env currently selects Ollama
+npm run chat -- --without-ollama
+```
+
+For a persistent setting, use `CHAT_ENABLE_OLLAMA=true` or `CHAT_ENABLE_OLLAMA=false` in `.env`. Command-line flags take precedence. If Ollama is enabled, no separate installation is required: the launcher first looks for native Ollama on macOS and otherwise pulls the official image when missing. Docker model downloads remain in the `ollama-models` volume.
 
 To make an Ollama model the default, configure `.env`:
 
@@ -182,9 +218,7 @@ OLLAMA_CONTEXT_LENGTH=16384
 
 > ❗ **Important:** Always make sure to use a model that supports **tool calls**. For more information, please refer to: https://ollama.com/search?c=tools
 
-You can also select Ollama in Datum UI and pull a model with the add button. 
-
-Deleting a model from Datum removes only its saved configuration; it does not remove the downloaded model from Ollama. If you want the downloaded model deleted, please use the following command:
+When Ollama is enabled, you can select it in Datum and pull a model with the add button. `npm run chat:stop` stops the active containers without deleting downloaded models. Deleting a model from Datum removes only its saved configuration; it does not remove the downloaded model from Ollama. If you want the downloaded model deleted, please use the following command:
 
 ```bash
 ollama rm <model-name>
@@ -201,6 +235,7 @@ Datum can use any model that supports `tool calls` through one of its two API fo
 | Service | `MODEL_PROVIDER` | Example model | `MODEL_BASE_URL` |
 |---|---|---|---|
 | Ollama | `ollama` | `qwen3:8b` | `http://ollama:11434/v1` |
+| OpenRouter | `openrouter` | select a tool-capable model from the live catalog | `https://openrouter.ai/api/v1` |
 | Google Gemini | `openai` | `gemini-3.7-flash` | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | DeepSeek | `openai` | `deepseek-v4-pro` | `https://api.deepseek.com` |
 | OpenAI GPT | `openai` | a current GPT model with Chat Completions tool calling | `https://api.openai.com/v1` |
@@ -209,6 +244,7 @@ Datum can use any model that supports `tool calls` through one of its two API fo
 Model names and availability change. Confirm the exact model identifier in the provider documentation:
 
 - [DeepSeek models and pricing](https://api-docs.deepseek.com/quick_start/pricing/)
+- [OpenRouter model catalog](https://openrouter.ai/models?supported_parameters=tools)
 - [Gemini models](https://ai.google.dev/gemini-api/docs/models)
 - [OpenAI models](https://platform.openai.com/docs/models)
 - [Claude models](https://docs.anthropic.com/en/docs/about-claude/models/overview)
@@ -230,10 +266,11 @@ npm run chat:stop
 
 `npm run chat` uses this image-selection sequence:
 
-1. On macOS, use a running native Ollama service when one is detected.
-2. Otherwise, check whether the official Ollama image exists and pull it when missing.
-3. Check whether the CityJSON MCP image exists and pull it when missing.
-4. Start the selected Ollama service and the chat application in detached mode without building an image.
+1. Read `.env` and resolve Ollama mode from `--with-ollama`, `--without-ollama`, `CHAT_ENABLE_OLLAMA`, or `MODEL_PROVIDER`, in that order.
+2. Print whether startup is cloud-only, native Ollama, or bundled Ollama.
+3. If Ollama is enabled on macOS, use a running native service when detected; otherwise pull the official Ollama image only when it is missing.
+4. Check whether the CityJSON MCP image exists and pull it when missing.
+5. Start Datum and, when selected, its Ollama companion in detached mode without building an image.
 
 The application binds to `127.0.0.1:3000`. Docker volumes store imported files, derived datasets, and downloaded Ollama models. Ollama is available only to the internal Compose network and is not published on a host port.
 
@@ -498,12 +535,13 @@ Expected tools: `cityjson_import`, `cityjson_clean_vertices`, `cityjson_validate
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MODEL_PROVIDER` | `anthropic` | Model API selection: `anthropic`, `openai`, or `ollama`. |
+| `MODEL_PROVIDER` | `anthropic` | Model service: `ollama`, `openrouter`, `openai`, or `anthropic`. |
 | `MODEL_NAME` | none | Default Datum model identifier. |
 | `MODEL_API_KEY` | none | Default Datum model API key. |
 | `MODEL_BASE_URL` | provider default | Model API base URL. |
 | `MODEL_MAX_OUTPUT_TOKENS` | `4096` | Maximum output tokens per model call. |
 | `MODEL_TEMPERATURE` | `0.1` | Model sampling temperature. |
+| `CHAT_ENABLE_OLLAMA` | automatic | Start bundled/native Ollama with Datum. When unset, enabled only for `MODEL_PROVIDER=ollama`; CLI flags override it. |
 | `CHAT_HOST` | `127.0.0.1` | Datum bind address outside Docker. |
 | `CHAT_PORT` | `3000` | Datum port. |
 | `CHAT_MAX_UPLOAD_BYTES` | `1073741824` | Maximum upload size. |

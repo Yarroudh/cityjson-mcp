@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadEnvFile, getWebConfig } from './env.mjs';
 import { McpGateway } from './mcp-gateway.mjs';
 import { createModelClient } from './model-client.mjs';
+import { MODEL_PROVIDER_NAMES, modelProvider } from './model-providers.mjs';
 import { receiveUploads } from './uploads.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -62,9 +63,10 @@ function clientKey(value) {
 
 export function configuredModel(baseConfig, input, previousConfig = baseConfig) {
   const requestedProvider = typeof input.provider === 'string' ? input.provider.trim().toLowerCase() : '';
-  if (!['anthropic', 'openai', 'ollama'].includes(requestedProvider)) throw new Error('Model provider must be anthropic, openai, or ollama');
-  const service = requestedProvider === 'ollama' ? 'ollama' : requestedProvider;
-  const provider = requestedProvider === 'ollama' ? 'openai' : requestedProvider;
+  const definition = modelProvider(requestedProvider);
+  if (!definition) throw new Error(`Model provider must be one of: ${MODEL_PROVIDER_NAMES.join(', ')}`);
+  const service = requestedProvider;
+  const provider = definition.apiStyle;
   const model = typeof input.model === 'string' ? input.model.trim() : '';
   if (!model || model.length > 200) throw new Error('Enter a valid model name');
   const rawBaseUrl = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : '';
@@ -76,13 +78,83 @@ export function configuredModel(baseConfig, input, previousConfig = baseConfig) 
     throw new Error('Model base URL must use HTTP(S) and cannot contain credentials');
   }
   const suppliedKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
-  const apiKey = suppliedKey || previousConfig.apiKey || (service === 'ollama' ? 'ollama' : null);
+  let sameCredentialOrigin = false;
+  try { sameCredentialOrigin = new URL(previousConfig.baseUrl).origin === parsedUrl.origin; }
+  catch { /* The new validated URL cannot match an invalid previous endpoint. */ }
+  const previousKey = sameCredentialOrigin && (previousConfig.service === service || previousConfig.provider === service)
+    ? previousConfig.apiKey
+    : null;
+  const apiKey = suppliedKey || previousKey || (definition.requiresApiKey === false ? service : null);
   if (!apiKey || apiKey.length > 10000) throw new Error('Enter a valid API key');
   return { ...baseConfig, provider, service, model, apiKey, baseUrl: rawBaseUrl.replace(/\/$/, '') };
 }
 
 function publicModelConfig(config) {
   return { provider: config.service || config.provider, model: config.model, baseUrl: config.baseUrl, compatibility: config.compatibility || null };
+}
+
+function modelBaseUrl(value, label) {
+  let parsed;
+  try { parsed = new URL(String(value || '').trim()); }
+  catch { throw new Error(`Enter a valid ${label} base URL`); }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error(`${label} base URL must use HTTP(S) and cannot contain credentials`);
+  }
+  return parsed;
+}
+
+async function discoverOllamaModels(fetchImpl, rawBaseUrl) {
+  const baseUrl = modelBaseUrl(rawBaseUrl, 'Ollama');
+  const discoveryUrl = `${baseUrl.toString().replace(/\/$/, '').replace(/\/v1$/, '')}/api/tags`;
+  let response;
+  try {
+    response = await fetchImpl(discoveryUrl, { signal: AbortSignal.timeout(10_000) });
+  } catch (error) {
+    throw new Error(`Could not connect to Ollama at ${baseUrl.origin}. Make sure Ollama is running and the base URL is reachable from Datum${error.name === 'TimeoutError' ? ' (connection timed out)' : ''}`);
+  }
+  if (!response.ok) throw new Error(`Ollama returned ${response.status} while listing models`);
+  const body = await response.json();
+  return (body.models || [])
+    .map(item => item.name)
+    .filter(name => typeof name === 'string')
+    .map(name => ({ id: name, name, isFree: true }));
+}
+
+async function discoverOpenRouterModels(fetchImpl, rawBaseUrl, apiKey) {
+  const baseUrl = modelBaseUrl(rawBaseUrl, 'OpenRouter');
+  if (!apiKey) throw new Error('Enter an OpenRouter API key before loading its model catalog');
+  const catalogUrl = `${baseUrl.toString().replace(/\/$/, '')}/models?supported_parameters=tools&sort=pricing-low-to-high`;
+  let response;
+  try {
+    response = await fetchImpl(catalogUrl, {
+      signal: AbortSignal.timeout(15_000),
+      headers: { authorization: `Bearer ${apiKey}` }
+    });
+  } catch (error) {
+    throw new Error(`Could not connect to OpenRouter at ${baseUrl.origin}${error.name === 'TimeoutError' ? ' (connection timed out)' : ''}`);
+  }
+  const text = await response.text();
+  let body;
+  try { body = text ? JSON.parse(text) : {}; }
+  catch { body = {}; }
+  if (!response.ok) throw new Error(body?.error?.message || `OpenRouter returned ${response.status} while listing models`);
+  const models = (body.data || [])
+    .filter(item => typeof item?.id === 'string' && item.supported_parameters?.includes('tools'))
+    .filter(item => item.id !== 'openrouter/free')
+    .slice(0, 499)
+    .map(item => ({
+      id: item.id,
+      name: typeof item.name === 'string' ? item.name : item.id,
+      isFree: Number(item.pricing?.prompt) === 0 && Number(item.pricing?.completion) === 0,
+      contextLength: Number.isSafeInteger(item.context_length) ? item.context_length : null
+    }));
+  return [{
+    id: 'openrouter/free',
+    name: 'Free Models Router',
+    isFree: true,
+    isRecommended: true,
+    contextLength: null
+  }, ...models];
 }
 
 export async function ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId = latestDatasetId, options = {}) {
@@ -313,23 +385,27 @@ export async function createChatApplication(config = getWebConfig(), dependencie
 
       if (request.method === 'GET' && url.pathname === '/api/models/discover') {
         if (url.searchParams.get('provider') !== 'ollama') throw new Error('Model discovery is currently available only for Ollama');
-        const rawBaseUrl = url.searchParams.get('baseUrl') || '';
-        let baseUrl;
-        try { baseUrl = new URL(rawBaseUrl); }
-        catch { throw new Error('Enter a valid Ollama base URL'); }
-        if (!['http:', 'https:'].includes(baseUrl.protocol) || baseUrl.username || baseUrl.password) {
-          throw new Error('Ollama base URL must use HTTP(S) and cannot contain credentials');
+        const models = await discoverOllamaModels(dependencies.fetchImpl || fetch, url.searchParams.get('baseUrl'));
+        sendJson(response, 200, { models: models.map(item => item.id) });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/models/discover') {
+        const body = await readJson(request, 32 * 1024);
+        const service = typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : '';
+        if (!['ollama', 'openrouter'].includes(service)) throw new Error('Model discovery is available for Ollama and OpenRouter');
+        let apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+        if (!apiKey && typeof body.modelId === 'string' && typeof body.clientId === 'string') {
+          const state = configurationFor(clientKey(body.clientId));
+          const profile = body.modelId === defaultProfile?.id ? defaultProfile : state?.profiles.get(body.modelId);
+          let sameCredentialOrigin = false;
+          try { sameCredentialOrigin = new URL(profile?.config.baseUrl).origin === new URL(body.baseUrl).origin; }
+          catch { /* The discovery helper reports the invalid endpoint below. */ }
+          if (profile?.config.service === service && sameCredentialOrigin) apiKey = profile.config.apiKey;
         }
-        const discoveryUrl = `${baseUrl.toString().replace(/\/$/, '').replace(/\/v1$/, '')}/api/tags`;
-        let discoveryResponse;
-        try {
-          discoveryResponse = await (dependencies.fetchImpl || fetch)(discoveryUrl, { signal: AbortSignal.timeout(10_000) });
-        } catch (error) {
-          throw new Error(`Could not connect to Ollama at ${baseUrl.origin}. Make sure Ollama is running and the base URL is reachable from Datum${error.name === 'TimeoutError' ? ' (connection timed out)' : ''}`);
-        }
-        if (!discoveryResponse.ok) throw new Error(`Ollama returned ${discoveryResponse.status} while listing models`);
-        const discovered = await discoveryResponse.json();
-        const models = (discovered.models || []).map(item => item.name).filter(name => typeof name === 'string');
+        const models = service === 'ollama'
+          ? await discoverOllamaModels(dependencies.fetchImpl || fetch, body.baseUrl)
+          : await discoverOpenRouterModels(dependencies.fetchImpl || fetch, body.baseUrl, apiKey);
         sendJson(response, 200, { models });
         return;
       }
@@ -544,7 +620,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           });
         }
         if (modelConfigurations.has(browserId)) modelConfigurations.get(browserId).updatedAt = Date.now();
-        const modelFingerprint = `${selected.config.provider}\u0000${selected.config.model}\u0000${selected.config.baseUrl}`;
+        const modelFingerprint = `${selected.config.service || selected.config.provider}\u0000${selected.config.model}\u0000${selected.config.baseUrl}`;
         const batch = body.batchId ? uploadBatches.get(body.batchId) : undefined;
         const requestedDatasetId = typeof body.datasetId === 'string' && /^[A-Za-z0-9_.:-]{3,300}$/.test(body.datasetId.trim())
           ? body.datasetId.trim()
@@ -746,7 +822,7 @@ export async function startChatApplication() {
     app.server.once('error', reject);
     app.server.listen(config.port, config.host, resolve);
   });
-  console.log(`Datum listening on http://${config.host}:${config.port} (${config.provider}/${config.model})`);
+  console.log(`Datum listening on http://${config.host}:${config.port} (${config.service || config.provider}/${config.model})`);
 
   const shutdown = async () => {
     const forceExit = setTimeout(() => process.exit(0), 3000);

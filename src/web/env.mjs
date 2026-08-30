@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { MODEL_PROVIDER_NAMES, modelProvider, providerApiKey } from './model-providers.mjs';
 
 function unquote(value) {
   const trimmed = value.trim();
@@ -51,10 +52,11 @@ function numberInRange(value, fallback, name, minimum, maximum) {
 
 export function getWebConfig(env = process.env) {
   const requestedProvider = (env.MODEL_PROVIDER || 'anthropic').toLowerCase();
-  if (!['anthropic', 'openai', 'ollama'].includes(requestedProvider)) throw new Error('MODEL_PROVIDER must be anthropic, openai, or ollama');
-  const service = requestedProvider === 'ollama' ? 'ollama' : requestedProvider;
-  const provider = requestedProvider === 'ollama' ? 'openai' : requestedProvider;
-  const apiKey = env.MODEL_API_KEY || (provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.OPENAI_API_KEY) || (service === 'ollama' ? 'ollama' : null);
+  const definition = modelProvider(requestedProvider);
+  if (!definition) throw new Error(`MODEL_PROVIDER must be one of: ${MODEL_PROVIDER_NAMES.join(', ')}`);
+  const service = requestedProvider;
+  const provider = definition.apiStyle;
+  const apiKey = env.MODEL_API_KEY || providerApiKey(env, service);
   const model = env.MODEL_NAME?.trim() || null;
 
   return {
@@ -64,7 +66,7 @@ export function getWebConfig(env = process.env) {
     ollamaContextLength: positiveInteger(env.OLLAMA_CONTEXT_LENGTH, 16384, 'OLLAMA_CONTEXT_LENGTH'),
     apiKey,
     model,
-    baseUrl: env.MODEL_BASE_URL || (provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'),
+    baseUrl: env.MODEL_BASE_URL || definition.defaultBaseUrl,
     maxOutputTokens: positiveInteger(env.MODEL_MAX_OUTPUT_TOKENS, 4096, 'MODEL_MAX_OUTPUT_TOKENS'),
     temperature: numberInRange(env.MODEL_TEMPERATURE, 0.1, 'MODEL_TEMPERATURE', 0, 1),
     maxToolRounds: positiveInteger(env.CHAT_MAX_TOOL_ROUNDS, 12, 'CHAT_MAX_TOOL_ROUNDS'),

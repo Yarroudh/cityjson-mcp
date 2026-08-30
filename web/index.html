@@ -185,11 +185,12 @@
           <div><span class="modal-kicker">Model</span><h2 id="model-dialog-title">Add a model</h2></div>
           <button class="modal-close" id="model-dialog-close" type="button" aria-label="Close">×</button>
         </header>
-        <p class="modal-intro" id="model-dialog-intro">Add an Ollama, Anthropic, or OpenAI model. Credentials stay in the running application and are never displayed after saving.</p>
-        <label class="field"><span>Provider</span><select id="model-provider" required><option value="ollama">Ollama (local)</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
+        <p class="modal-intro" id="model-dialog-intro">Add a local model or cloud model provider. Credentials stay in the running application and are never displayed after saving.</p>
+        <label class="field"><span>Provider</span><select id="model-provider" required><option value="ollama">Ollama (local)</option><option value="openrouter">OpenRouter (cloud catalog)</option><option value="openai">OpenAI-compatible API (cloud)</option><option value="anthropic">Anthropic (cloud)</option></select></label>
         <div class="field"><label for="model-name">Model name</label><div class="model-name-picker"><input id="model-name" type="text" maxlength="200" autocomplete="off" required placeholder="e.g. qwen3:8b" role="combobox" aria-autocomplete="list" aria-controls="ollama-model-options" aria-expanded="false"><div class="model-name-actions"><button class="model-field-action" id="discover-models" type="button" title="Refresh installed Ollama models" aria-label="Refresh installed Ollama models"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.5 10A7 7 0 0 0 6 7.5L4 11M5.5 14A7 7 0 0 0 18 16.5l2-3.5"/></svg></button><button class="model-field-action" id="pull-model-open" type="button" title="Pull a new Ollama model" aria-label="Pull a new Ollama model"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div><div class="model-name-options" id="ollama-model-options" role="listbox" hidden></div></div></div>
         <label class="field"><span>API key</span><input id="model-api-key" type="password" maxlength="10000" autocomplete="new-password" required placeholder="Enter the API key"></label>
         <label class="field"><span>Base URL</span><input id="model-base-url" type="url" maxlength="2048" autocomplete="off" required placeholder="https://api.example.com"></label>
+        <p class="ollama-context-note" id="model-provider-note" hidden></p>
         <p class="ollama-context-note" id="ollama-context-note" hidden>Context window: <strong id="ollama-context-length">16K tokens</strong>. Larger windows use more memory. Configure <code>OLLAMA_CONTEXT_LENGTH</code> and restart the Ollama service to change it.</p>
         <p class="model-form-error" id="model-form-error" role="alert" hidden></p>
         <footer class="modal-actions"><button class="stub-button" id="model-cancel" type="button">Cancel</button><button class="stub-button primary" type="submit"><span id="model-submit-label">Use this model</span></button></footer>
@@ -259,6 +260,6 @@
       </article>
     </dialog>
   </div>
-  <script type="module" src="/app.js?v=32"></script>
+  <script type="module" src="/app.js?v=37"></script>
 </body>
 </html>

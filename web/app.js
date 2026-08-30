@@ -61,6 +61,7 @@ const elements = {
   pullModelOpen: document.querySelector('#pull-model-open'),
   modelApiKey: document.querySelector('#model-api-key'),
   modelBaseUrl: document.querySelector('#model-base-url'),
+  modelProviderNote: document.querySelector('#model-provider-note'),
   ollamaContextNote: document.querySelector('#ollama-context-note'),
   ollamaContextLength: document.querySelector('#ollama-context-length'),
   ollamaPullDialog: document.querySelector('#ollama-pull-dialog'),
@@ -122,7 +123,8 @@ let dragDepth = 0;
 let clientId;
 let pendingSuggestion = null;
 let editingModelId = null;
-let ollamaModelNames = [];
+let editingModelProvider = null;
+let discoveredModels = [];
 let pendingDeleteModel = null;
 let pullController = null;
 let viewer = null;
@@ -948,10 +950,11 @@ function showToolDocumentation(tool) {
 
 function openModelDialog(model = null) {
   editingModelId = model?.id || null;
+  editingModelProvider = model?.provider || null;
   elements.modelDialogTitle.textContent = model ? 'Edit model' : 'Add a model';
   elements.modelDialogIntro.textContent = model
     ? 'Update this model configuration. Leave the API key blank to keep the existing key. Saving runs a brief tool-call test.'
-    : 'Add an Ollama, Anthropic, or OpenAI model. A brief tool-call test must pass before it is saved. Credentials stay in the running application and are never displayed after saving.';
+    : 'Add a local model or cloud model provider. A brief tool-call test must pass before it is saved. Credentials stay in the running application and are never displayed after saving.';
   elements.modelSubmitLabel.textContent = model ? 'Save changes' : 'Use this model';
   elements.modelFormError.hidden = true;
   elements.modelFormError.textContent = '';
@@ -960,15 +963,14 @@ function openModelDialog(model = null) {
   elements.modelApiKey.value = '';
   elements.modelApiKey.required = !model && elements.modelProvider.value !== 'ollama';
   elements.modelApiKey.placeholder = elements.modelProvider.value === 'ollama' ? 'Not required for local Ollama' : (model ? 'Leave blank to keep the current key' : 'Enter the API key');
-  elements.modelBaseUrl.value = model?.baseUrl || (elements.modelProvider.value === 'anthropic'
-    ? 'https://api.anthropic.com'
-    : elements.modelProvider.value === 'ollama' ? (runtimeConfig?.ollamaBaseUrl || 'http://127.0.0.1:11434/v1') : 'https://api.openai.com/v1');
-  elements.discoverModels.hidden = elements.modelProvider.value !== 'ollama';
+  elements.modelBaseUrl.value = model?.baseUrl || providerDefaults()[elements.modelProvider.value];
+  elements.discoverModels.hidden = !providerSupportsDiscovery(elements.modelProvider.value);
   elements.pullModelOpen.hidden = elements.modelProvider.value !== 'ollama';
   elements.ollamaContextNote.hidden = elements.modelProvider.value !== 'ollama';
   elements.ollamaContextLength.textContent = `${Math.round((runtimeConfig?.ollamaContextLength || 16384) / 1024)}K tokens`;
+  updateProviderHelp();
   elements.modelDialog.showModal();
-  if (elements.modelProvider.value === 'ollama') void discoverOllamaModels();
+  if (elements.modelProvider.value === 'ollama') void discoverProviderModels();
 }
 
 function closeOllamaModelOptions() {
@@ -976,19 +978,50 @@ function closeOllamaModelOptions() {
   elements.modelName.setAttribute('aria-expanded', 'false');
 }
 
-function renderOllamaModelOptions(open = true) {
+function providerDefaults() {
+  return {
+    openai: 'https://api.openai.com/v1',
+    anthropic: 'https://api.anthropic.com',
+    openrouter: 'https://openrouter.ai/api/v1',
+    ollama: runtimeConfig?.ollamaBaseUrl || 'http://127.0.0.1:11434/v1'
+  };
+}
+
+function providerSupportsDiscovery(provider) {
+  return ['ollama', 'openrouter'].includes(provider);
+}
+
+function updateProviderHelp() {
+  const provider = elements.modelProvider.value;
+  const notes = {
+    openrouter: 'For free cloud use, start with openrouter/free (recommended); it automatically selects an available free model that supports the requested tools. Paid Gemini or DeepSeek models are more predictable for demanding workflows.',
+    openai: 'Use an OpenAI API key, or enter another OpenAI-compatible Chat Completions base URL and its provider key. GPT Nano API usage is billed.',
+    anthropic: 'Use an Anthropic API key and a Claude model that supports tool use.'
+  };
+  elements.modelProviderNote.textContent = notes[provider] || '';
+  elements.modelProviderNote.hidden = !notes[provider];
+  elements.modelName.placeholder = provider === 'ollama' ? 'e.g. qwen3:8b'
+    : provider === 'openrouter' ? 'recommended: openrouter/free'
+        : provider === 'openai' ? 'e.g. gpt-5-nano' : 'e.g. claude-sonnet-4-5';
+  elements.discoverModels.title = provider === 'openrouter' ? 'Load tool-capable OpenRouter models'
+    : 'Refresh installed Ollama models';
+  elements.discoverModels.setAttribute('aria-label', elements.discoverModels.title);
+}
+
+function renderDiscoveredModelOptions(open = true) {
   const query = elements.modelName.value.trim().toLowerCase();
-  const names = ollamaModelNames.filter(name => !query || name.toLowerCase().includes(query));
-  if (names.length) {
-    elements.ollamaModelOptions.replaceChildren(...names.map(name => {
+  const models = discoveredModels.filter(model => !query || model.id.toLowerCase().includes(query) || model.name.toLowerCase().includes(query));
+  if (models.length) {
+    elements.ollamaModelOptions.replaceChildren(...models.map(model => {
       const option = document.createElement('button');
       option.type = 'button';
       option.className = 'model-name-option';
       option.setAttribute('role', 'option');
-      option.setAttribute('aria-selected', String(name === elements.modelName.value));
-      option.textContent = name;
+      option.setAttribute('aria-selected', String(model.id === elements.modelName.value));
+      const details = [model.isRecommended ? 'recommended' : null, model.isFree ? 'free' : null, model.contextLength ? `${Math.round(model.contextLength / 1000)}K context` : null].filter(Boolean);
+      option.textContent = `${model.name}${model.name === model.id ? '' : ` · ${model.id}`}${details.length ? ` · ${details.join(' · ')}` : ''}`;
       option.addEventListener('click', () => {
-        elements.modelName.value = name;
+        elements.modelName.value = model.id;
         closeOllamaModelOptions();
         elements.modelName.focus();
       });
@@ -997,28 +1030,39 @@ function renderOllamaModelOptions(open = true) {
   } else {
     const empty = document.createElement('span');
     empty.className = 'model-name-empty';
-    empty.textContent = ollamaModelNames.length ? 'No matching installed models' : 'No installed models found';
+    empty.textContent = discoveredModels.length ? 'No matching models' : 'No models found';
     elements.ollamaModelOptions.replaceChildren(empty);
   }
-  const shouldOpen = open && elements.modelProvider.value === 'ollama';
+  const shouldOpen = open && providerSupportsDiscovery(elements.modelProvider.value);
   elements.ollamaModelOptions.hidden = !shouldOpen;
   elements.modelName.setAttribute('aria-expanded', String(shouldOpen));
 }
 
-async function discoverOllamaModels() {
+async function discoverProviderModels() {
+  const provider = elements.modelProvider.value;
   elements.discoverModels.disabled = true;
   elements.discoverModels.classList.add('loading');
   elements.modelFormError.hidden = true;
   try {
-    const query = new URLSearchParams({ provider: 'ollama', baseUrl: elements.modelBaseUrl.value });
-    const result = await requestJson(`/api/models/discover?${query}`);
-    ollamaModelNames = result.models;
-    if (ollamaModelNames.length === 1 && !elements.modelName.value) elements.modelName.value = ollamaModelNames[0];
-    renderOllamaModelOptions();
-    if (!ollamaModelNames.length) throw new Error('Ollama is reachable, but no models are installed');
+    const result = await requestJson('/api/models/discover', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        clientId,
+        modelId: editingModelId,
+        provider,
+        apiKey: elements.modelApiKey.value,
+        baseUrl: elements.modelBaseUrl.value
+      })
+    });
+    discoveredModels = result.models;
+    if (discoveredModels.length === 1 && !elements.modelName.value) elements.modelName.value = discoveredModels[0].id;
+    renderDiscoveredModelOptions();
+    if (!discoveredModels.length) throw new Error(`${provider === 'ollama' ? 'Ollama is reachable, but no models are installed' : 'No tool-capable models were returned'}`);
   } catch (error) {
     closeOllamaModelOptions();
-    elements.modelFormError.textContent = `Could not load Ollama models: ${error.message}`;
+    const providerName = provider === 'ollama' ? 'Ollama' : 'OpenRouter';
+    elements.modelFormError.textContent = `Could not load ${providerName} models: ${error.message}`;
     elements.modelFormError.hidden = false;
   } finally {
     elements.discoverModels.disabled = false;
@@ -1396,22 +1440,21 @@ for (const dialog of [elements.modelDialog, elements.ollamaPullDialog, elements.
   });
 }
 elements.modelProvider.addEventListener('change', () => {
-  const defaults = {
-    openai: 'https://api.openai.com/v1',
-    anthropic: 'https://api.anthropic.com',
-    ollama: runtimeConfig?.ollamaBaseUrl || 'http://127.0.0.1:11434/v1'
-  };
-  elements.modelBaseUrl.value = defaults[elements.modelProvider.value];
+  elements.modelBaseUrl.value = providerDefaults()[elements.modelProvider.value];
+  elements.modelName.value = '';
+  discoveredModels = [];
   const isOllama = elements.modelProvider.value === 'ollama';
-  elements.modelApiKey.required = !isOllama && !editingModelId;
-  elements.modelApiKey.placeholder = isOllama ? 'Not required for local Ollama' : (editingModelId ? 'Leave blank to keep the current key' : 'Enter the API key');
-  elements.discoverModels.hidden = !isOllama;
+  const changedProvider = Boolean(editingModelId && elements.modelProvider.value !== editingModelProvider);
+  elements.modelApiKey.required = !isOllama && (!editingModelId || changedProvider);
+  elements.modelApiKey.placeholder = isOllama ? 'Not required for local Ollama' : (editingModelId && !changedProvider ? 'Leave blank to keep the current key' : 'Enter the API key');
+  elements.discoverModels.hidden = !providerSupportsDiscovery(elements.modelProvider.value);
   elements.pullModelOpen.hidden = !isOllama;
   elements.ollamaContextNote.hidden = !isOllama;
-  if (isOllama) void discoverOllamaModels();
+  updateProviderHelp();
+  if (isOllama) void discoverProviderModels();
   else closeOllamaModelOptions();
 });
-elements.discoverModels.addEventListener('click', () => discoverOllamaModels());
+elements.discoverModels.addEventListener('click', () => discoverProviderModels());
 elements.pullModelOpen.addEventListener('click', () => {
   closeOllamaModelOptions();
   elements.ollamaPullName.value = elements.modelName.value || 'qwen3:8b';
@@ -1472,7 +1515,7 @@ elements.ollamaPullForm.addEventListener('submit', async event => {
     }
     elements.modelName.value = model;
     elements.ollamaPullDialog.close();
-    await discoverOllamaModels();
+    await discoverProviderModels();
   } catch (error) {
     if (error.name === 'AbortError') elements.ollamaPullDialog.close();
     else {
@@ -1489,10 +1532,10 @@ elements.ollamaPullForm.addEventListener('submit', async event => {
   }
 });
 elements.modelName.addEventListener('focus', () => {
-  if (elements.modelProvider.value === 'ollama' && ollamaModelNames.length) renderOllamaModelOptions();
+  if (providerSupportsDiscovery(elements.modelProvider.value) && discoveredModels.length) renderDiscoveredModelOptions();
 });
 elements.modelName.addEventListener('input', () => {
-  if (elements.modelProvider.value === 'ollama' && ollamaModelNames.length) renderOllamaModelOptions();
+  if (providerSupportsDiscovery(elements.modelProvider.value) && discoveredModels.length) renderDiscoveredModelOptions();
 });
 elements.modelName.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeOllamaModelOptions();
@@ -1527,6 +1570,7 @@ elements.modelForm.addEventListener('submit', async event => {
     });
     configureRuntime({ ...runtimeConfig, ...selected });
     editingModelId = null;
+    editingModelProvider = null;
     elements.modelDialog.close();
     render();
   } catch (error) {

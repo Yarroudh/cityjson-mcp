@@ -65,9 +65,13 @@ For direct browser attachments, start the included one-page chat application:
 npm run chat
 ```
 
+The launcher starts cloud-only by default unless `MODEL_PROVIDER=ollama`. Use `npm run chat -- --with-ollama` to add the Ollama companion or `npm run chat -- --without-ollama` to force cloud-only startup. The selected mode is printed before any image pull.
+
 Open <http://127.0.0.1:3000>. The application streams attachments into `/input`, calls `cityjson_import` over MCP, and sends only the returned dataset handle to the model.
 
 Configure the model from the page, or optionally provide a default with `MODEL_PROVIDER`, `MODEL_NAME`, `MODEL_API_KEY`, and `MODEL_BASE_URL` in the repository `.env`.
+
+The page supports local Ollama plus OpenRouter, OpenAI-compatible, and Anthropic cloud models. OpenRouter can discover its current tool-capable catalog from the model dialog. Datum connects directly to the configured provider API and requires the corresponding provider key.
 
 A local PostGIS development database for `cjdb` is available with:
 
