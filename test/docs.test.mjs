@@ -56,6 +56,19 @@ test('README lists every registered MCP tool', async () => {
   for (const name of names) assert.match(readme, new RegExp(`\\b${name}\\b`), `${name} must be documented`);
 });
 
+test('detailed tool reference documents every registered MCP tool exactly once', async () => {
+  const [reference, registration] = await Promise.all([
+    fs.readFile(path.join(root, 'docs', 'CityJSON-MCP-Tools.md'), 'utf8'),
+    fs.readFile(path.join(root, 'src', 'tools', 'register-tools.mjs'), 'utf8')
+  ]);
+  const registered = [...registration.matchAll(/server\.registerTool\('([^']+)'/g)].map(match => match[1]);
+  const documented = [...reference.matchAll(/^### `([^`]+)`$/gm)].map(match => match[1]);
+  assert.equal(registered.length, 37);
+  assert.deepEqual(documented.sort(), registered.sort());
+  assert.match(reference, /parameters/i);
+  assert.match(reference, /how it works/i);
+});
+
 test('chat startup checks the local image before pulling and never builds automatically', async () => {
   const [packageText, startup, compose] = await Promise.all([
     fs.readFile(path.join(root, 'package.json'), 'utf8'),

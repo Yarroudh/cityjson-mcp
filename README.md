@@ -435,6 +435,8 @@ flowchart LR
 
 The server exposes 37 tools.
 
+For complete parameter schemas, backend behavior, return values, and example workflows, see the [CityJSON MCP tools reference](docs/CityJSON-MCP-Tools.md).
+
 ### Dataset management and inspection
 
 | Tool | Backend | Purpose |
