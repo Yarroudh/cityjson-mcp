@@ -91,6 +91,49 @@ test('wiki documentation includes Home, Datum, and every supplied Datum screensh
   assert.doesNotMatch(datum, /datum-about/i);
 });
 
+test('installation guide covers every supported setup path and backend', async () => {
+  const [home, installation] = await Promise.all([
+    fs.readFile(path.join(root, 'docs', 'Home.md'), 'utf8'),
+    fs.readFile(path.join(root, 'docs', 'Installation.md'), 'utf8')
+  ]);
+  assert.match(home, /\[Installation and configuration\]\(Installation\)/);
+  for (const section of [
+    'Recommended Docker installation',
+    'Install only the MCP server for another client',
+    'Manual host installation',
+    'PostgreSQL and PostGIS for cjdb',
+    'Complete configuration reference',
+    'Update an installation',
+    'Stop or remove the installation',
+    'Troubleshooting'
+  ]) assert.match(installation, new RegExp(`^## ${section}$`, 'm'));
+  for (const backend of ['cjio', 'cjval', 'val3dity', 'CityGML Tools', 'cjdb']) {
+    assert.match(installation, new RegExp(`\\b${backend.replaceAll(' ', '\\s+')}\\b`, 'i'));
+  }
+  for (const command of ['npm run chat', 'npm run doctor', 'npm test', 'npm run check']) {
+    assert.match(installation, new RegExp(command.replaceAll(' ', '\\s+')));
+  }
+  for (const variable of [
+    'MODEL_PROVIDER',
+    'MODEL_NAME',
+    'MODEL_API_KEY',
+    'MODEL_BASE_URL',
+    'CHAT_ENABLE_OLLAMA',
+    'OLLAMA_CONTEXT_LENGTH',
+    'CHAT_MAX_TOOL_ROUNDS',
+    'CITYJSON_MCP_ALLOWED_ROOTS',
+    'CITYJSON_MCP_INPUT',
+    'CITYJSON_MCP_WORKSPACE',
+    'CITYJSON_MCP_COMMAND_TIMEOUT_MS',
+    'CJIO_BIN',
+    'CJVAL_BIN',
+    'VAL3DITY_BIN',
+    'CITYGML_TOOLS_BIN',
+    'CJDB_BIN',
+    'PGPASSWORD'
+  ]) assert.match(installation, new RegExp(`\\b${variable}\\b`));
+});
+
 test('chat startup checks the local image before pulling and never builds automatically', async () => {
   const [packageText, startup, compose] = await Promise.all([
     fs.readFile(path.join(root, 'package.json'), 'utf8'),

@@ -10,6 +10,7 @@ CityJSON MCP gives an AI client controlled access to CityJSON inspection, valida
 
 | Page | Use it for |
 |---|---|
+| [Installation and configuration](Installation) | Install Docker or host backends, configure models and paths, connect MCP clients, verify, update, and troubleshoot. |
 | [Datum guide](Datum) | Learn the interface, import workflow, viewer, model management, security, and troubleshooting. |
 | [CityJSON MCP tools reference](CityJSON-MCP-Tools) | Review every tool, parameter, backend, return value, and common workflow. |
 | [Project README](https://github.com/Yarroudh/cityjson-mcp#readme) | Install the project, configure the environment, and start the services. |
@@ -34,18 +35,20 @@ Datum adds a visual workflow around these tools. It provides file import, conver
 
 ## How the pieces connect
 
-```text
-CityJSON file
-      ↓
-Datum browser interface
-      ↓
-Datum server
-      ↓
-Language model with tool support
-      ↓
-CityJSON MCP server
-      ↓
-Native JavaScript, cjio, cjval, val3dity, CityGML Tools, and cjdb
+```mermaid
+flowchart TD
+    A["CityJSON file"]
+    B["Datum browser interface"]
+    C["Datum server"]
+    D["Language model with tool support"]
+    E["CityJSON MCP server"]
+    F["Native JavaScript, cjio, cjval, val3dity, CityGML Tools, and cjdb"]
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
 ```
 
 The language model decides which MCP tool to call. The MCP server validates the parameters, runs the relevant implementation, and returns structured results. Datum shows progress and keeps the current dataset handle attached to the conversation.
@@ -100,4 +103,4 @@ Treat any local MCP server as trusted local software and review model provider p
 
 ## Recommended reading
 
-New users should read the [Datum guide](Datum), then keep the [tools reference](CityJSON-MCP-Tools) open while trying the example workflows.
+New users should begin with [Installation and configuration](Installation), continue with the [Datum guide](Datum), then keep the [tools reference](CityJSON-MCP-Tools) open while trying the example workflows.

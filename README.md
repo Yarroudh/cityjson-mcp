@@ -100,6 +100,8 @@ Datum is the official AI client provided with CityJSON MCP toolbox. It accepts C
 
 For a complete visual tour of the interface and its behavior, see the [Datum guide](docs/Datum.md).
 
+For every supported setup path and environment option, see [Installation and configuration](docs/Installation.md).
+
 ### Requirements
 
 - Docker Desktop or Docker Engine with Docker Compose.
