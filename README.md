@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/MCP_tools-37-5c6ac4.svg" alt="37 MCP tools">
   <a href="https://hub.docker.com/r/yarroudh/cityjson-mcp"><img src="https://img.shields.io/badge/Docker-yarroudh%2Fcityjson--mcp-2496ed.svg" alt="Docker image"></a>
   <a href="https://doi.org/10.5281/zenodo.22151334"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.22151334.svg" alt="DOI"></a>
+  <a href="https://github.com/Yarroudh/cityjson-mcp/wiki"><img src="https://img.shields.io/badge/docs-Wiki-181717.svg" alt="Wiki"></a>
 </p>
 
 CityJSON MCP provides a web chat application and an MCP server for CityJSON files. It supports inspection, queries, validation, transformations, export, CityGML conversion, and cjdb/PostGIS operations.
