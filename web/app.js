@@ -447,7 +447,8 @@ async function loadViewerDataset(conversation, force = false) {
         body: JSON.stringify({
           datasetId,
           datasetIsDerived: conversation.datasetIsDerived === true,
-          storedFilename: conversation.storedFilename
+          storedFilename: conversation.storedFilename,
+          originalFilename: conversation.originalFilename
         })
       }),
       import('/viewer.js?v=9')
@@ -497,7 +498,8 @@ async function downloadDataset(conversation, event) {
       body: JSON.stringify({
         datasetId: conversation.summary.datasetId,
         datasetIsDerived: conversation.datasetIsDerived === true,
-        storedFilename: conversation.storedFilename
+        storedFilename: conversation.storedFilename,
+        originalFilename: conversation.originalFilename
       })
     });
     if (result.datasetId && result.datasetId !== conversation.summary.datasetId) {

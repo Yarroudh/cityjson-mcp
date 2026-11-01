@@ -24,14 +24,19 @@ export class PathPolicy {
 
   assertReadable(inputPath) {
     const resolved = path.resolve(inputPath);
-    const inAllowedRoot = this.roots.some(root => resolved === root || resolved.startsWith(root + path.sep));
-    const inInput = resolved === this.input || resolved.startsWith(this.input + path.sep);
-    const inWorkspace = resolved === this.workspace || resolved.startsWith(this.workspace + path.sep);
+    if (!fs.existsSync(resolved)) throw new Error(`Path does not exist: ${resolved}`);
+    const realPath = fs.realpathSync(resolved);
+    const inside = root => {
+      const realRoot = fs.realpathSync(root);
+      return realPath === realRoot || realPath.startsWith(realRoot + path.sep);
+    };
+    const inAllowedRoot = this.roots.some(root => fs.existsSync(root) && inside(root));
+    const inInput = inside(this.input);
+    const inWorkspace = inside(this.workspace);
     if (!inAllowedRoot && !inInput && !inWorkspace) {
       throw new Error(`Path is outside allowed roots: ${resolved}`);
     }
-    if (!fs.existsSync(resolved)) throw new Error(`Path does not exist: ${resolved}`);
-    return resolved;
+    return realPath;
   }
 
   assertWritable(outputPath) {

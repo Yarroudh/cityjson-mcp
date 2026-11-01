@@ -2,7 +2,7 @@ import * as z from 'zod/v4';
 import { jsonResult, errorResult } from '../util/mcp-result.mjs';
 import { queryCityObjects, objectBBox } from '../core/cityjson-native.mjs';
 
-const datasetId = z.string().min(3).describe('Dataset handle returned by cityjson_import, cityjson_open, cityjson_import_text, or another transformation tool.');
+const datasetId = z.string().min(3).describe('Filename returned by cityjson_open, cityjson_import, or a transformation. Internal dataset handles also work for compatibility.');
 const bbox = z.tuple([z.number(), z.number(), z.number(), z.number()]).describe('2D bbox [minX, minY, maxX, maxY] in the dataset CRS.');
 const dbConnection = z.object({
   host: z.string().min(1),
@@ -58,10 +58,10 @@ export function registerTools(server, deps) {
   })));
 
   server.registerTool('cityjson_open', {
-    title: 'Open CityJSON from a Docker mount',
-    description: 'Open a CityJSON file by a full server-visible path inside an allowed root. This is an advanced path-based operation. For files delivered to the configured input inbox, use cityjson_import with a filename instead.',
+    title: 'Open a CityJSON file',
+    description: 'Open a CityJSON file from an optional configured project or data folder by filename, relative path, or full server-visible path. The server snapshots the file and returns its filename for later tools.',
     inputSchema: z.object({
-      source: z.string().min(1).describe('Full server-visible path inside an allowed root. This cannot be a path from a chat attachment.')
+      source: z.string().min(1).describe('CityJSON filename or relative path in an optional configured data folder, or full server-visible path. For an attached file, use cityjson_upload.')
     })
   }, safe(async ({ source }) => jsonResult(await dm.open(source))));
 
@@ -73,15 +73,16 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_import', {
     title: 'Import CityJSON from the input inbox',
-    description: 'Import a CityJSON file already placed in the configured input inbox and return an immutable dataset handle. Pass only its filename, never an absolute path. If filename is omitted, the import succeeds only when the inbox contains exactly one JSON file.',
+    description: 'Register a CityJSON file already placed in the configured input inbox and return its filename. This is for clients with an upload bridge, such as Datum. If filename is omitted, the inbox must contain exactly one JSON file.',
     inputSchema: z.object({
-      filename: z.string().min(1).max(255).optional().describe('Filename shown by cityjson_list_imports or supplied by the chat application attachment metadata.')
+      filename: z.string().min(1).max(255).optional().describe('Filename shown by cityjson_list_imports or supplied by the chat application attachment metadata.'),
+      display_filename: z.string().min(1).max(255).optional().describe('Original user-visible filename when an upload bridge stores the file under a generated name.')
     })
-  }, safe(async ({ filename }) => jsonResult(await dm.importFile(filename))));
+  }, safe(async ({ filename, display_filename }) => jsonResult(await dm.importFile(filename, display_filename))));
 
   server.registerTool('cityjson_import_text', {
     title: 'Import a small CityJSON text document',
-    description: 'Fallback for small programmatically supplied CityJSON documents only. The complete JSON travels through the MCP request, so never use it for normal chat attachments or large models; use cityjson_import instead.',
+    description: 'Import a small complete CityJSON document already available as text, including a small chat attachment exposed to the model by the client. Preserve the original filename. For missing, incomplete, or large attachments, use cityjson_upload.',
     inputSchema: z.object({
       content: z.string().min(2).describe('Complete UTF-8 CityJSON document as JSON text.'),
       filename: z.string().min(1).max(200).default('import.city.json').describe('Display filename used for the managed workspace copy.')
@@ -103,7 +104,7 @@ export function registerTools(server, deps) {
       throw new Error(`Downloaded CityJSON exceeds the ${inlineLimit}-byte inline MCP limit`);
     }
     const result = webHost ? reference : await dm.downloadContent(dataset_id, filename);
-    const metadata = { datasetId: result.datasetId, filename: result.filename, mimeType: result.mimeType, sizeBytes: result.sizeBytes };
+    const metadata = { filename: result.filename, mimeType: result.mimeType, sizeBytes: result.sizeBytes };
     const content = [
       { type: 'text', text: JSON.stringify(metadata, null, 2) },
       { type: 'resource_link', uri: `cityjson://download/${encodeURIComponent(result.filename)}`, name: result.filename, mimeType: result.mimeType, size: result.sizeBytes }
@@ -217,7 +218,7 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_subset', {
     title: 'Create CityJSON subset',
-    description: 'Create a derived CityJSON subset with cjio using IDs, bbox, radius, random count or CityObject types. Returns a new dataset_id.',
+    description: 'Create a derived CityJSON subset with cjio using IDs, bbox, radius, random count or CityObject types. Returns a new filename.',
     inputSchema: z.object({
       dataset_id: datasetId,
       ids: z.array(z.string()).optional(),
@@ -234,7 +235,7 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_filter_lod', {
     title: 'Filter CityJSON LoD',
-    description: 'Keep only one level of detail using cjio lod_filter. Returns a new dataset_id.',
+    description: 'Keep only one level of detail using cjio lod_filter. Returns a new filename.',
     inputSchema: z.object({ dataset_id: datasetId, lod: z.string().min(1) })
   }, safe(async ({ dataset_id, lod }, ctx) => {
     const r = await cjio.filterLod(dataset_id, lod, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio', command: commandSummary(r.result) });
@@ -242,7 +243,7 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_reproject', {
     title: 'Reproject CityJSON',
-    description: 'Reproject coordinates to a target EPSG CRS with cjio. The source dataset must already define a CRS. Returns a new dataset_id.',
+    description: 'Reproject coordinates to a target EPSG CRS with cjio. The source file must already define a CRS. Returns a new filename.',
     inputSchema: z.object({ dataset_id: datasetId, epsg: z.number().int().positive(), digit: z.number().int().min(1).max(12).optional() })
   }, safe(async ({ dataset_id, epsg, digit }, ctx) => {
     const r = await cjio.reproject(dataset_id, epsg, digit, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio', command: commandSummary(r.result) });
@@ -250,7 +251,7 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_assign_crs', {
     title: 'Assign CityJSON CRS',
-    description: 'Assign/update the EPSG reference without changing coordinate values using cjio. Returns a new dataset_id.',
+    description: 'Assign/update the EPSG reference without changing coordinate values using cjio. Returns a new filename.',
     inputSchema: z.object({ dataset_id: datasetId, epsg: z.number().int().positive() })
   }, safe(async ({ dataset_id, epsg }, ctx) => { const r = await cjio.assignCrs(dataset_id, epsg, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
@@ -262,7 +263,7 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_clean_vertices', {
     title: 'Clean CityJSON vertices',
-    description: 'Remove duplicate and orphan vertices with cjio vertices_clean. Returns a new dataset_id.',
+    description: 'Remove duplicate and orphan vertices with cjio vertices_clean. Returns a new filename.',
     inputSchema: z.object({ dataset_id: datasetId })
   }, safe(async ({ dataset_id }, ctx) => { const r = await cjio.clean(dataset_id, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
@@ -274,7 +275,7 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_merge', {
     title: 'Merge CityJSON datasets',
-    description: 'Merge two or more opened CityJSON datasets with cjio. Returns a new dataset_id.',
+    description: 'Merge two or more opened CityJSON files with cjio. Returns a new filename.',
     inputSchema: z.object({ dataset_ids: z.array(datasetId).min(2) })
   }, safe(async ({ dataset_ids }, ctx) => { const r = await cjio.merge(dataset_ids, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
@@ -292,13 +293,13 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_remove_textures', {
     title: 'Remove CityJSON textures',
-    description: 'Remove all textures with cjio. Returns a new dataset_id.',
+    description: 'Remove all textures with cjio. Returns a new filename.',
     inputSchema: z.object({ dataset_id: datasetId })
   }, safe(async ({ dataset_id }, ctx) => { const r = await cjio.removeTextures(dataset_id, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
   server.registerTool('cityjson_remove_materials', {
     title: 'Remove CityJSON materials',
-    description: 'Remove all materials with cjio. Returns a new dataset_id.',
+    description: 'Remove all materials with cjio. Returns a new filename.',
     inputSchema: z.object({ dataset_id: datasetId })
   }, safe(async ({ dataset_id }, ctx) => { const r = await cjio.removeMaterials(dataset_id, commandOptions(ctx)); return jsonResult({ ...r.derived, backend: 'cjio' }); }));
 
@@ -316,7 +317,7 @@ export function registerTools(server, deps) {
 
   server.registerTool('citygml_to_cityjson', {
     title: 'Convert CityGML to CityJSON',
-    description: 'Convert a CityGML 1.0/2.0/3.0 GML/XML dataset to CityJSON using citygml-tools. A regular CityJSON output is automatically opened and returned as a dataset_id.',
+    description: 'Convert a CityGML 1.0/2.0/3.0 GML/XML file to CityJSON using citygml-tools. A regular CityJSON output is automatically registered and returned by filename.',
     inputSchema: z.object({ source: z.string().min(1), json_lines: z.boolean().default(false) })
   }, safe(async ({ source, json_lines }, ctx) => jsonResult(await citygml.toCityJSON(source, { jsonLines: json_lines, ...commandOptions(ctx) }))));
 
@@ -334,7 +335,7 @@ export function registerTools(server, deps) {
 
   server.registerTool('cityjson_db_export', {
     title: 'Export CityJSON from cjdb',
-    description: 'Export all objects or a read-only SELECT-defined subset from cjdb to CityJSONSeq and optionally collect it into a normal CityJSON dataset handle.',
+    description: 'Export all objects or a read-only SELECT-defined subset from cjdb to CityJSONSeq and optionally collect it into a named CityJSON file.',
     inputSchema: z.object({ connection: dbConnection, query: z.string().optional().describe('Optional SELECT query that returns object_id rows. Mutating SQL and semicolons are rejected.'), collect: z.boolean().default(true) })
   }, safe(async ({ connection, query, collect }) => jsonResult(await cjdb.exportDataset(connection, { query, collect }))));
 

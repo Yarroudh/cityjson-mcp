@@ -30,6 +30,8 @@ The import sequence is:
 
 Only JSON files are accepted by the browser interface. The upload count and size are controlled by `CHAT_MAX_UPLOAD_FILES` and `CHAT_MAX_UPLOAD_BYTES`.
 
+Datum uploads files directly through its browser interface. The separate [MCP Apps upload panel](CityJSON-MCP-Tools#cityjson_upload) is for Claude Desktop and other compatible MCP clients.
+
 ## Conversation workspace
 
 ![Datum conversation workspace](assets/datum-conversation.png)
@@ -54,7 +56,7 @@ Suggested questions are shortcuts. Selecting one places the prompt in the compos
 3. The selected language model receives the 37 MCP tool schemas.
 4. The model can call one or more tools over several rounds.
 5. Datum streams status updates, text, tool starts, progress, and tool completion events to the browser.
-6. If a transformation returns a new dataset handle, that handle becomes the current conversation state.
+6. If a transformation returns a new CityJSON file, that file becomes the current conversation state.
 7. The final answer and available downloads are stored with the browser conversation.
 
 Only one response can run at a time for a conversation. A running response can be cancelled. Messages can be copied, and earlier user questions can be retried from their saved server checkpoint while that checkpoint exists.

@@ -6,6 +6,8 @@
         "run",
         "--rm",
         "-i",
+        "--mount",
+        "type=volume,source=cityjson-mcp-data,target=/data",
         "yarroudh/cityjson-mcp:latest"
       ]
     }

@@ -262,7 +262,7 @@ test('HTML versions application assets to prevent cached UI mismatches', async (
     fs.readFile(path.join(projectRoot, 'web', 'app.js'), 'utf8')
   ]);
   assert.match(html, /styles\.css\?v=22/);
-  assert.match(html, /app\.js\?v=37/);
+  assert.match(html, /app\.js\?v=38/);
   assert.match(html, /value="openrouter"/);
   assert.doesNotMatch(html, /value="opencode"/);
   assert.doesNotMatch(html, /value="zai"/);
@@ -483,11 +483,11 @@ test('chat restores and explicitly scopes an expired conversation dataset instea
   });
   assert.equal(response.status, 200);
   assert.equal(JSON.parse(response.body).datasetId, 'cj_restored');
-  assert.match(receivedMessage, /Active conversation dataset: dataset_id=cj_restored/);
-  assert.match(receivedMessage, /exact current model/);
+  assert.match(receivedMessage, /Active CityJSON file: "cj_restored"/);
+  assert.match(receivedMessage, /exact current file/);
   assert.deepEqual(calls.slice(1), [
     { name: 'cityjson_info', args: { dataset_id: 'cj_expired' } },
-    { name: 'cityjson_import', args: { filename: 'import-123-model.city.json' } }
+    { name: 'cityjson_import', args: { filename: 'import-123-model.city.json', display_filename: 'model.city.json' } }
   ]);
 });
 
@@ -876,8 +876,9 @@ test('chat API streams progress and final response events as NDJSON', async t =>
       onEvent({ type: 'tool_start', id: 'tool-1', name: 'cityjson_validate' });
       onEvent({ type: 'tool_progress', id: 'tool-1', name: 'cityjson_validate', progress: 1, total: 2, message: 'Structural validation complete' });
       onEvent({ type: 'tool_end', id: 'tool-1', name: 'cityjson_validate', durationMs: 12, isError: false });
-      onEvent({ type: 'text_delta', text: 'All checks passed.' });
-      return { text: 'All checks passed.', history: [], trace: [{ name: 'cityjson_validate', durationMs: 12, isError: false }] };
+      onEvent({ type: 'text_delta', text: 'The dataset_id is cj_123' });
+      onEvent({ type: 'text_delta', text: '456abcdef. All checks passed.' });
+      return { text: 'The dataset_id is cj_123456abcdef. All checks passed.', history: [], trace: [{ name: 'cityjson_validate', durationMs: 12, isError: false }] };
     }
   };
   const gateway = {
@@ -891,13 +892,14 @@ test('chat API streams progress and final response events as NDJSON', async t =>
   const app = await createChatApplication(config, { gateway, model });
   t.after(async () => { await app.close(); await fs.rm(input, { recursive: true, force: true }); });
   const response = await applicationRequest(app.server, 'POST', '/api/chat', {
-    sessionId: 'stream-session-123', clientId: 'stream-client-123', message: 'Validate it', stream: true
+    sessionId: 'stream-session-123', clientId: 'stream-client-123', message: 'Validate it', originalFilename: 'model.city.json', stream: true
   });
   assert.equal(response.status, 200);
   assert.match(response.headers['content-type'], /application\/x-ndjson/);
   const events = ndjsonEvents(response);
-  assert.deepEqual(events.map(event => event.type), ['status', 'tool_start', 'tool_progress', 'tool_end', 'text_delta', 'complete']);
-  assert.equal(events.at(-1).message, 'All checks passed.');
+  assert.deepEqual(events.filter(event => event.type !== 'text_delta').map(event => event.type), ['status', 'tool_start', 'tool_progress', 'tool_end', 'complete']);
+  assert.equal(events.filter(event => event.type === 'text_delta').map(event => event.text).join(''), 'The file name is model.city.json. All checks passed.');
+  assert.equal(events.at(-1).message, 'The file name is model.city.json. All checks passed.');
 });
 
 test('chat cancellation aborts an active streamed turn', async t => {
@@ -1047,9 +1049,16 @@ test('web MCP gateway discovers tools and imports from the inbox over stdio', as
   assert.ok(importTool);
   assert.match(importTool.description, /input inbox/);
   assert.equal(importTool.inputSchema.type, 'object');
-  const imported = await gateway.call('cityjson_import', { filename: 'gateway.city.json' });
+  const imported = await gateway.call('cityjson_import', { filename: 'gateway.city.json', display_filename: 'original model.city.json' });
   assert.equal(imported.isError, false);
   assert.equal(imported.structuredContent.cityObjectCount, 2);
+  assert.equal(imported.structuredContent.datasetId, 'original_model.city.json');
+  assert.equal(imported.modelContent.includes('datasetId'), false);
+  const opened = await gateway.call('cityjson_open', { source: 'gateway.city.json' });
+  assert.equal(opened.isError, false);
+  assert.equal(opened.modelContent.includes('datasetId'), false);
+  const inspected = await gateway.call('cityjson_info', { dataset_id: opened.structuredContent.filename });
+  assert.equal(inspected.structuredContent.cityObjectCount, 2);
   const downloaded = await gateway.call('cityjson_download', { dataset_id: imported.structuredContent.datasetId });
   assert.equal(downloaded.isError, false);
   assert.equal(downloaded.downloads.length, 1);

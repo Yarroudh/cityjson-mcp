@@ -1,17 +1,17 @@
 # CityJSON MCP tool reference
 
-This page documents all 37 tools exposed by the CityJSON MCP server. It is generated from the current tool schemas and implementations, not merely from example prompts.
+This page documents the 38 user-facing tools exposed by the standalone CityJSON MCP server. Four additional upload transport tools are visible only to the in-chat upload app. Datum uses 37 tools because its browser handles uploads directly.
 
 ## How the toolbox works
 
 ### Dataset handles and immutable transformations
 
-Most tools operate on a `dataset_id`, a handle such as `cj_a1b2c3d4e5f6`. A handle is returned by an import/open tool or by a transformation. The server stores the corresponding file in its managed workspace and persists the handle registry there.
+Most tools accept the filename returned by `cityjson_open`, an import, or a transformation in the `dataset_id` parameter. The parameter name is technical; assistants should refer to files by name when speaking to users. The server stores snapshots and derived files in its managed workspace and persists the registry there.
 
-Transformations are immutable: they create a new managed file and return a new `dataset_id`; they do not overwrite the source. A typical workflow is:
+Transformations create a new managed file and return its filename; they do not overwrite the source. A typical workflow is:
 
 ```text
-cityjson_import
+cityjson_open("model.city.json")
   → cityjson_info / cityjson_query
   → transformation(s)
   → cityjson_validate
@@ -34,6 +34,7 @@ Tools do not normally invoke other MCP tools. Instead, the client chains tools i
 
 ### Paths and security
 
+- `cityjson_upload` opens a file picker in MCP Apps compatible clients and sends file chunks directly to the server.
 - `cityjson_import` accepts a filename from the configured input inbox, not a path.
 - `cityjson_open`, `cityjson_save`, export and conversion paths must be inside `CITYJSON_MCP_ALLOWED_ROOTS`, the input directory, or the managed workspace as applicable.
 - Database passwords are never accepted as tool parameters. Set `PGPASSWORD` in the server environment.
@@ -48,54 +49,55 @@ Tools do not normally invoke other MCP tools. Instead, the client chains tools i
 2. [`cityjson_open`](#cityjson_open)
 3. [`cityjson_list_imports`](#cityjson_list_imports)
 4. [`cityjson_import`](#cityjson_import)
-5. [`cityjson_import_text`](#cityjson_import_text)
-6. [`cityjson_download`](#cityjson_download)
-7. [`cityjson_info`](#cityjson_info)
-8. [`cityjson_save`](#cityjson_save)
+5. [`cityjson_upload`](#cityjson_upload)
+6. [`cityjson_import_text`](#cityjson_import_text)
+7. [`cityjson_download`](#cityjson_download)
+8. [`cityjson_info`](#cityjson_info)
+9. [`cityjson_save`](#cityjson_save)
 
 ### Native inspection and query
 
-9. [`cityjson_list_objects`](#cityjson_list_objects)
-10. [`cityjson_get_object`](#cityjson_get_object)
-11. [`cityjson_query`](#cityjson_query)
+10. [`cityjson_list_objects`](#cityjson_list_objects)
+11. [`cityjson_get_object`](#cityjson_get_object)
+12. [`cityjson_query`](#cityjson_query)
 
 ### Validation
 
-12. [`cityjson_validate_schema`](#cityjson_validate_schema)
-13. [`cityjson_validate_geometry`](#cityjson_validate_geometry)
-14. [`cityjson_validate`](#cityjson_validate)
+13. [`cityjson_validate_schema`](#cityjson_validate_schema)
+14. [`cityjson_validate_geometry`](#cityjson_validate_geometry)
+15. [`cityjson_validate`](#cityjson_validate)
 
 ### Transformation and export
 
-15. [`cityjson_subset`](#cityjson_subset)
-16. [`cityjson_filter_lod`](#cityjson_filter_lod)
-17. [`cityjson_reproject`](#cityjson_reproject)
-18. [`cityjson_assign_crs`](#cityjson_assign_crs)
-19. [`cityjson_translate`](#cityjson_translate)
-20. [`cityjson_clean_vertices`](#cityjson_clean_vertices)
-21. [`cityjson_triangulate`](#cityjson_triangulate)
-22. [`cityjson_merge`](#cityjson_merge)
-23. [`cityjson_attribute_rename`](#cityjson_attribute_rename)
-24. [`cityjson_attribute_remove`](#cityjson_attribute_remove)
-25. [`cityjson_remove_textures`](#cityjson_remove_textures)
-26. [`cityjson_remove_materials`](#cityjson_remove_materials)
-27. [`cityjson_upgrade`](#cityjson_upgrade)
-28. [`cityjson_export`](#cityjson_export)
+16. [`cityjson_subset`](#cityjson_subset)
+17. [`cityjson_filter_lod`](#cityjson_filter_lod)
+18. [`cityjson_reproject`](#cityjson_reproject)
+19. [`cityjson_assign_crs`](#cityjson_assign_crs)
+20. [`cityjson_translate`](#cityjson_translate)
+21. [`cityjson_clean_vertices`](#cityjson_clean_vertices)
+22. [`cityjson_triangulate`](#cityjson_triangulate)
+23. [`cityjson_merge`](#cityjson_merge)
+24. [`cityjson_attribute_rename`](#cityjson_attribute_rename)
+25. [`cityjson_attribute_remove`](#cityjson_attribute_remove)
+26. [`cityjson_remove_textures`](#cityjson_remove_textures)
+27. [`cityjson_remove_materials`](#cityjson_remove_materials)
+28. [`cityjson_upgrade`](#cityjson_upgrade)
+29. [`cityjson_export`](#cityjson_export)
 
 ### CityGML and database
 
-29. [`citygml_to_cityjson`](#citygml_to_cityjson)
-30. [`cityjson_to_citygml`](#cityjson_to_citygml)
-31. [`cityjson_db_import`](#cityjson_db_import)
-32. [`cityjson_db_export`](#cityjson_db_export)
+30. [`citygml_to_cityjson`](#citygml_to_cityjson)
+31. [`cityjson_to_citygml`](#cityjson_to_citygml)
+32. [`cityjson_db_import`](#cityjson_db_import)
+33. [`cityjson_db_export`](#cityjson_db_export)
 
 ### Specification, schemas and extensions
 
-33. [`cityjson_spec_outline`](#cityjson_spec_outline)
-34. [`cityjson_spec_read`](#cityjson_spec_read)
-35. [`cityjson_schema_read`](#cityjson_schema_read)
-36. [`cityjson_extensions_registry`](#cityjson_extensions_registry)
-37. [`cityjson_extension_schema`](#cityjson_extension_schema)
+34. [`cityjson_spec_outline`](#cityjson_spec_outline)
+35. [`cityjson_spec_read`](#cityjson_spec_read)
+36. [`cityjson_schema_read`](#cityjson_schema_read)
+37. [`cityjson_extensions_registry`](#cityjson_extensions_registry)
+38. [`cityjson_extension_schema`](#cityjson_extension_schema)
 
 ## Server and dataset lifecycle
 
@@ -115,19 +117,19 @@ Checks whether each external executable is installed and callable. Use it first 
 
 ### `cityjson_open`
 
-Opens an existing CityJSON file by a full path visible to the server and creates a dataset handle.
+Opens an existing CityJSON file from a configured project or data folder by filename, relative path, or full server-visible path.
 
 **Engine:** native parser and dataset manager.
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `source` | string | yes | Full path to a CityJSON file inside an allowed root. |
+| `source` | string | yes | Filename or relative path in an allowed root, or full server-visible path. |
 
-**How it works:** validates the path against the path policy, parses the JSON, verifies root `type: "CityJSON"`, `CityObjects` and `vertices`, then registers the original file without copying it.
+**How it works:** resolves the name within allowed roots, rejects ambiguous names and paths outside those roots, copies the file to the managed workspace, parses it, and registers the snapshot. Later edits to the source file do not change the opened snapshot.
 
-**Returns:** `datasetId`, path, byte size, version, object/vertex counts, type counts, LoDs, attributes, metadata, transform and extensions.
+**Returns:** filename, byte size, version, object/vertex counts, type counts, LoDs, attributes, metadata, transform and extensions. The internal handle is not returned to MCP clients.
 
-**Use with:** `cityjson_info`, query/validation/transformation tools, then `cityjson_download`. Prefer `cityjson_import` for attachments or inbox files.
+**Use with:** `cityjson_info`, query/validation/transformation tools, then `cityjson_download`. An IDE can use the filename returned by this tool for subsequent calls. Datum handles browser attachments through its own upload bridge and `cityjson_import`.
 
 ### `cityjson_list_imports`
 
@@ -152,12 +154,25 @@ Imports a CityJSON file from the configured input inbox into the managed workspa
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
 | `filename` | string from 1 to 255 characters | no | none | Inbox filename only; paths are rejected. |
+| `display_filename` | string from 1 to 255 characters | no | none | Original filename when an upload bridge used a generated inbox name. |
 
 **How it works:** if `filename` is omitted, import succeeds only when exactly one JSON file exists. The source is copied to a uniquely named workspace file, parsed, summarized and registered. Invalid copies are removed.
 
-**Returns:** new `datasetId`, source filename, size, operation and CityJSON summary.
+**Returns:** filename, size, operation and CityJSON summary. The inbox storage name and internal handle are not returned to MCP clients.
 
-**Use with:** this is the normal entry point for browser attachments and mounted input files. Use `cityjson_list_imports` if the filename is unknown.
+**Use with:** this is the internal entry point for Datum's browser attachments and other clients with an input inbox bridge. For normal IDE project files, use `cityjson_open`.
+
+### `cityjson_upload`
+
+Opens an in-chat CityJSON file picker in MCP Apps compatible clients, including Claude Desktop. No project folder needs to be configured.
+
+| Parameter | Type | Required | Description |
+|---|---|---:|---|
+| `question` | string | no | The user's question to continue after the file is uploaded. |
+
+**How it works:** the user chooses or drops a `.json` file in the app. The app transfers chunks directly to the MCP server using four app-only tools, then the server parses and registers the file. The full JSON does not enter the model context. The default limit is 100 MiB, configurable with `CITYJSON_MCP_MAX_DIRECT_UPLOAD_BYTES`.
+
+**Returns:** an upload panel. After upload, the app continues the conversation using the registered filename. If the client cannot display MCP Apps, use a small JSON text import or an optional shared folder.
 
 ### `cityjson_import_text`
 
@@ -172,9 +187,9 @@ Imports a complete CityJSON document supplied directly as MCP text.
 
 **How it works:** checks `CITYJSON_MCP_MAX_UPLOAD_BYTES` (25 MiB by default), parses before writing, sanitizes the filename, creates a unique workspace file and registers it.
 
-**Returns:** new `datasetId`, workspace path, size, operation and summary.
+**Returns:** filename, size, operation and summary. Internal workspace paths and handles are not returned to MCP clients.
 
-**Use with:** small programmatically generated documents only. Do not put normal or large attachments into this argument; use `cityjson_import`.
+**Use with:** small complete JSON documents already available as text, including small chat attachments that the client exposes to the model. Use `cityjson_upload` for missing, incomplete, or large attachment text.
 
 ### `cityjson_download`
 
@@ -184,12 +199,12 @@ Prepares a managed CityJSON dataset for delivery to the client.
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Existing dataset handle. |
+| `dataset_id` | string | yes | Filename returned by an open, import, or transformation tool. |
 | `filename` | string from 1 to 200 characters | no | Suggested download filename; unsafe characters are replaced. |
 
 **How it works:** resolves the managed file and creates a `cityjson://download/...` resource link. Datum's web host streams the file from its managed path. A standalone MCP client also receives the JSON as an embedded resource, provided it is below `CITYJSON_MCP_MAX_DOWNLOAD_BYTES` (25 MiB by default).
 
-**Returns:** dataset ID, filename, MIME type, byte size, resource link and optionally embedded content.
+**Returns:** filename, MIME type, byte size, resource link and optionally embedded content.
 
 **Use with:** the final step after transformations. Calling it does not alter the dataset.
 
@@ -201,11 +216,11 @@ Returns a compact summary of the dataset without placing the complete model in c
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Existing dataset handle. |
+| `dataset_id` | string | yes | Filename returned by an open, import, or transformation tool. |
 
 **How it works:** reloads the registered file and scans its CityObjects and geometry metadata.
 
-**Returns:** path/size, CityJSON version, object and vertex counts, counts per object type, distinct LoDs, attribute names, metadata, transform and extensions.
+**Returns:** filename, size, CityJSON version, object and vertex counts, counts per object type, distinct LoDs, attribute names, metadata, transform and extensions.
 
 **Use with:** call immediately after import/open and before choosing query, transformation or validation steps.
 
@@ -217,13 +232,13 @@ Copies a managed CityJSON dataset to an explicit destination on the server.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Existing dataset handle. |
+| `dataset_id` | string | yes | none | Filename returned by an open, import, or transformation tool. |
 | `destination` | string | yes | none | Writable path inside an allowed root/workspace. |
 | `overwrite` | boolean | no | `false` | Permit replacement of an existing file. |
 
 **How it works:** validates the destination and creates its parent directory. With `overwrite: false`, an existing destination causes an error; otherwise the managed source is copied.
 
-**Returns:** dataset ID, managed source path and `savedTo` path.
+**Returns:** source filename and `savedTo` path.
 
 **Use with:** workflows that use folders mounted on the server. For ordinary chat delivery use `cityjson_download`.
 
@@ -237,7 +252,7 @@ Lists compact CityObject records with optional type filtering and pagination.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Existing dataset handle. |
+| `dataset_id` | string | yes | none | Filename returned by an open, import, or transformation tool. |
 | `types` | string[] | no | all | Exact CityObject types to include. |
 | `limit` | integer from 1 to 5000 | no | `100` | Maximum returned objects. |
 | `offset` | integer ≥ 0 | no | `0` | Number of matches to skip. |
@@ -256,7 +271,7 @@ Returns one complete CityObject plus its 3D bounding box in real world coordinat
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Existing dataset handle. |
+| `dataset_id` | string | yes | Filename returned by an open, import, or transformation tool. |
 | `object_id` | string | yes | Exact key in `CityObjects`. |
 
 **How it works:** looks up the object, recursively collects vertex indices referenced directly by its geometry boundaries, dequantizes vertices using `transform.scale` and `transform.translate`, and computes `[minX,minY,minZ,maxX,maxY,maxZ]`. It does not aggregate child geometry into a parent.
@@ -273,7 +288,7 @@ Queries CityObjects by IDs, types, 2D spatial intersection and attribute predica
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Existing dataset handle. |
+| `dataset_id` | string | yes | none | Filename returned by an open, import, or transformation tool. |
 | `ids` | string[] | no | all | Exact object IDs. |
 | `types` | string[] | no | all | Exact object types. |
 | `bbox` | `[minX,minY,maxX,maxY]` | no | none | 2D intersection box in the dataset CRS. |
@@ -297,7 +312,7 @@ Runs structural CityJSON validation with the official `cjval` command.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Existing dataset handle. |
+| `dataset_id` | string | yes | none | Filename returned by an open, import, or transformation tool. |
 | `extension_schemas` | string[] | no | `[]` | Readable extension schema paths on the server. |
 
 **How it works:** executes cjval in report mode and supplies every allowed extension schema. Validator exit codes other than zero are captured as validation results rather than transport failures. Progress notifications are emitted when requested by the MCP client.
@@ -314,7 +329,7 @@ Runs CityJSON 3D geometry validation with `val3dity`.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Existing dataset handle. |
+| `dataset_id` | string | yes | none | Filename returned by an open, import, or transformation tool. |
 | `verbose` | boolean | no | `false` | Request a verbose val3dity report. |
 
 **How it works:** writes a report JSON file in the managed workspace and parses it. Validation exit codes other than zero remain valid tool responses. It derives validity from the report when possible and builds a compact summary.
@@ -331,7 +346,7 @@ Runs complete structural and geometric validation concurrently.
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Existing dataset handle. |
+| `dataset_id` | string | yes | Filename returned by an open, import, or transformation tool. |
 
 **How it works:** starts both validators in parallel, reports two progress steps, and uses `Promise.allSettled` so one backend failure does not erase the other result.
 
@@ -341,7 +356,7 @@ Runs complete structural and geometric validation concurrently.
 
 ## Transformation and export
 
-All transformation tools in this section use `cjio`, keep their source datasets unchanged, write a new workspace file and register a new `dataset_id`, except `cityjson_export`, which writes an external format and returns file paths.
+All transformation tools in this section use `cjio`, keep their source files unchanged, write a new workspace file and return its filename, except `cityjson_export`, which writes an external format and returns file paths.
 
 ### `cityjson_subset`
 
@@ -349,7 +364,7 @@ Creates a subset selected by one or more spatial, semantic or random criteria.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Source handle. |
+| `dataset_id` | string | yes | none | Source filename. |
 | `ids` | string[] | conditionally | none | Object IDs supplied to the cjio ID filter. |
 | `bbox` | `[minX,minY,maxX,maxY]` | conditionally | none | Bounding box in the dataset CRS. |
 | `radius` | `[x,y,radius]` | conditionally | none | Center and positive radius. |
@@ -359,9 +374,9 @@ Creates a subset selected by one or more spatial, semantic or random criteria.
 
 At least one of `ids`, `bbox`, `radius`, `random` or `types` must be provided. Multiple arguments are passed together to `cjio subset`; exact combination behavior follows cjio.
 
-**Returns:** new dataset summary, parent dataset ID, backend and command summary.
+**Returns:** new filename, dataset summary, backend and command summary.
 
-**Use with:** IDs from `cityjson_query` or invalid IDs from validation; then validate and download the derived handle.
+**Use with:** IDs from `cityjson_query` or invalid IDs from validation; then validate and download the derived filename.
 
 ### `cityjson_filter_lod`
 
@@ -369,10 +384,10 @@ Keeps one level of detail with `cjio lod_filter`.
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Source handle. |
+| `dataset_id` | string | yes | Source filename. |
 | `lod` | string that is not empty | yes | LoD identifier exactly as understood by cjio, e.g. `2.2`. |
 
-**Returns:** a new dataset handle/summary plus backend and command details.
+**Returns:** a new filename and dataset summary plus backend and command details.
 
 **Use with:** inspect available values using `cityjson_info` first.
 
@@ -382,13 +397,13 @@ Reprojects coordinates with `cjio crs_reproject`.
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Source handle; it must already define a CRS. |
+| `dataset_id` | string | yes | Source filename; it must already define a CRS. |
 | `epsg` | positive integer | yes | Target EPSG code. |
 | `digit` | integer from 1 to 12 | no | Coordinate precision supplied to cjio. |
 
 **How it works:** transforms coordinate values and updates CRS metadata.
 
-**Returns:** new dataset handle/summary plus command details.
+**Returns:** new filename and dataset summary plus command details.
 
 **Use with:** if the source lacks CRS metadata and you know it, first call `cityjson_assign_crs`.
 
@@ -398,10 +413,10 @@ Assigns or updates CRS metadata with `cjio crs_assign` without reprojecting coor
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Source handle. |
+| `dataset_id` | string | yes | Source filename. |
 | `epsg` | positive integer | yes | EPSG code describing the existing coordinates. |
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
 **Important:** use only when the coordinate values already use that CRS. Use `cityjson_reproject` to change coordinate values.
 
@@ -411,10 +426,10 @@ Translates model coordinates with `cjio crs_translate`.
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Source handle. |
+| `dataset_id` | string | yes | Source filename. |
 | `minxyz` | `[x,y,z]` | no | Requested minimum coordinates supplied to cjio; when omitted cjio uses its default model minimum behavior. |
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
 **Use with:** coordinate normalization or relocation workflows; inspect the transform and metadata afterward.
 
@@ -426,7 +441,7 @@ Runs `cjio vertices_clean` to remove duplicate and unreferenced/orphan vertices 
 |---|---|---:|
 | `dataset_id` | string | yes |
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
 **Use with:** run before export or after operations that change geometry, then validate the result.
 
@@ -436,10 +451,10 @@ Triangulates surfaces with `cjio triangulate`.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Source handle. |
+| `dataset_id` | string | yes | none | Source filename. |
 | `sloppy` | boolean | no | `false` | Enables the less robust cjio fallback behavior. |
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
 **Use with:** keep `sloppy: false` first; retry with `true` only when robust triangulation fails. Validate afterward.
 
@@ -449,11 +464,11 @@ Merges two or more managed CityJSON datasets with cjio.
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_ids` | string[] (minimum 2) | yes | Source handles, in merge order. |
+| `dataset_ids` | string[] (minimum 2) | yes | Source filenames, in merge order. |
 
 **How it works:** opens the first dataset as the cjio pipeline source, applies `merge <path>` for every remaining dataset, saves and registers one derived file with all source IDs as parents.
 
-**Returns:** a new dataset handle/summary and command details.
+**Returns:** a new filename and dataset summary and command details.
 
 **Use with:** datasets should have compatible CRS/semantics; inspect and validate the merged result.
 
@@ -467,7 +482,7 @@ Renames one attribute across CityObjects using `cjio attribute_rename`.
 | `old_name` | string that is not empty | yes |
 | `new_name` | string that is not empty | yes |
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
 **Use with:** inspect `attributeNames` via `cityjson_info`, transform, then query the new name to verify.
 
@@ -480,9 +495,9 @@ Removes one attribute across CityObjects using `cjio attribute_remove`.
 | `dataset_id` | string | yes |
 | `name` | string that is not empty | yes |
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
-**Use with:** data minimization or schema cleanup; the source handle remains unchanged.
+**Use with:** data minimization or schema cleanup; the source file remains unchanged.
 
 ### `cityjson_remove_textures`
 
@@ -492,7 +507,7 @@ Removes all texture data with `cjio textures_remove`.
 |---|---|---:|
 | `dataset_id` | string | yes |
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
 **Use with:** reduce file size or prepare exports that contain only geometry. This removes textures globally, not selectively.
 
@@ -504,7 +519,7 @@ Removes all material data with `cjio materials_remove`.
 |---|---|---:|
 | `dataset_id` | string | yes |
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
 **Use with:** create datasets without appearance data. This removes materials globally, not selectively.
 
@@ -518,7 +533,7 @@ Upgrades an older supported CityJSON document with `cjio upgrade`.
 
 **How it works:** the installed cjio version determines supported source versions and the target version.
 
-**Returns:** a new dataset handle and summary.
+**Returns:** a new filename and dataset summary.
 
 **Use with:** inspect the resulting `version` and run `cityjson_validate`.
 
@@ -530,14 +545,14 @@ Exports a managed CityJSON dataset to another file format.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Source handle. |
+| `dataset_id` | string | yes | none | Source filename. |
 | `format` | enum | yes | none | `jsonl`, `obj`, `stl`, `glb` or `b3dm`. |
 | `destination` | string | yes | none | Writable output path on the server. |
 | `sloppy` | boolean | no | `false` | Enables the less robust cjio export behavior. |
 
 **How it works:** validates the destination, invokes cjio, then reports files that actually exist. OBJ export also checks for a sibling `.mtl` file.
 
-**Returns:** source dataset ID, format, requested destination, produced files and command output.
+**Returns:** source filename, format, requested destination, produced files and command output.
 
 **Important:** exported formats are not registered as CityJSON dataset handles. Use the host filesystem/output mount to retrieve them.
 
@@ -558,7 +573,7 @@ Converts CityGML 1.0/2.0/3.0 GML/XML to CityJSON.
 
 **Returns:** input, output directory, produced files, optional `derived` dataset summary, stdout/stderr.
 
-**Use with:** when `derived` exists, use its `datasetId` with the normal inspection/validation tools.
+**Use with:** when `derived` exists, use its `filename` with the normal inspection/validation tools.
 
 ### `cityjson_to_citygml`
 
@@ -568,13 +583,13 @@ Converts a managed CityJSON dataset to CityGML.
 
 | Parameter | Type | Required | Description |
 |---|---|---:|---|
-| `dataset_id` | string | yes | Source handle. |
+| `dataset_id` | string | yes | Source filename. |
 | `crs_name` | string | no | CRS name override supplied to the converter. |
 | `output_directory` | string | no | Writable destination directory; otherwise a unique workspace directory is used. |
 
 **How it works:** creates and validates the output directory, runs the converter, then recursively lists `.gml` and `.xml` outputs. The installed converter version controls the default encoding.
 
-**Returns:** dataset ID, output directory, produced files and command output.
+**Returns:** source filename, output directory, produced files and command output.
 
 ### `cityjson_db_import`
 
@@ -584,7 +599,7 @@ Imports a managed dataset into PostgreSQL/PostGIS through cjdb.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---:|---|---|
-| `dataset_id` | string | yes | none | Source handle. |
+| `dataset_id` | string | yes | none | Source filename. |
 | `connection.host` | string | yes | none | PostgreSQL host. |
 | `connection.user` | string | yes | none | PostgreSQL user. |
 | `connection.database` | string | yes | none | Database name. |
@@ -594,7 +609,7 @@ Imports a managed dataset into PostgreSQL/PostGIS through cjdb.
 
 **How it works:** exports the dataset to a managed `.city.jsonl` file, then imports that file with the supplied connection options. Passwords come from `PGPASSWORD`.
 
-**Returns:** dataset ID, connection details without the password, intermediate CityJSONSeq path and command output.
+**Returns:** source filename, connection details without the password, intermediate CityJSONSeq path and command output.
 
 **Side effects:** writes to the target database and creates an intermediate workspace file.
 
@@ -611,13 +626,13 @@ Exports all objects or a subset defined by a SELECT query from cjdb.
 | `connection.database` | string | yes | none | Database name. |
 | `connection.schema` | identifier string | yes | none | Schema beginning with a letter or underscore, followed by letters, numbers or underscores. |
 | `query` | string | no | all objects | SELECT that does not modify data and returns `object_id` rows. |
-| `collect` | boolean | no | `true` | Collect `.jsonl` into regular CityJSON and register a handle. |
+| `collect` | boolean | no | `true` | Collect `.jsonl` into regular CityJSON and register a named file. |
 
 **Query guard:** the query must begin with `SELECT`; semicolons and modifying or administration keywords are rejected. This is defense in depth, not a database security boundary. Use a restricted database role.
 
 **Returns:** connection details without the password, CityJSONSeq path, optional `derived` dataset summary and command output.
 
-**Use with:** when collected, continue with `derived.datasetId`; with `collect: false`, consume the `.city.jsonl` file from the workspace/output environment.
+**Use with:** when collected, continue with `derived.filename`; with `collect: false`, consume the `.city.jsonl` file from the workspace/output environment.
 
 ## Specification, schemas and extensions
 
@@ -711,35 +726,36 @@ Fetches one registered CityJSON Extension schema from the canonical registry URL
 ### Inspect and validate an attachment
 
 ```text
-cityjson_import(filename)
-  → cityjson_info(dataset_id)
-  → cityjson_validate(dataset_id)
+For a small complete JSON attachment: cityjson_import_text(content, filename)
+For a larger file: cityjson_upload(question) → choose the file in the panel
+  → cityjson_info(dataset_id=returned_filename)
+  → cityjson_validate(dataset_id=returned_filename)
 ```
 
 ### Extract invalid objects and download them
 
 ```text
-cityjson_validate(dataset_id)
+cityjson_validate(dataset_id=filename)
   → read geometry.reportSummary.invalidObjectIds
-  → cityjson_subset(dataset_id, ids)
-  → cityjson_download(new_dataset_id)
+  → cityjson_subset(dataset_id=filename, ids)
+  → cityjson_download(dataset_id=derived_filename)
 ```
 
 ### Query, transform and deliver
 
 ```text
-cityjson_query(dataset_id, types/bbox/attributes)
-  → cityjson_subset(dataset_id, ids)
-  → cityjson_filter_lod(new_dataset_id, lod)
-  → cityjson_reproject(new_dataset_id, epsg)
-  → cityjson_validate(new_dataset_id)
-  → cityjson_download(new_dataset_id)
+cityjson_query(dataset_id=filename, types/bbox/attributes)
+  → cityjson_subset(dataset_id=filename, ids)
+  → cityjson_filter_lod(dataset_id=derived_filename, lod)
+  → cityjson_reproject(dataset_id=derived_filename, epsg)
+  → cityjson_validate(dataset_id=derived_filename)
+  → cityjson_download(dataset_id=derived_filename)
 ```
 
 ### Database round trip
 
 ```text
-cityjson_import
+upload or open the file by name
   → cityjson_db_import  (internally CityJSON → CityJSONSeq via cjio)
   → cityjson_db_export  (optionally CityJSONSeq → CityJSON via cjio)
   → cityjson_info / cityjson_validate
@@ -754,6 +770,7 @@ cityjson_import
 | `CITYJSON_MCP_WORKSPACE` | managed directory | Managed originals, derived files, reports and registry. |
 | `CITYJSON_MCP_COMMAND_TIMEOUT_MS` | `120000` | External command timeout. |
 | `CITYJSON_MCP_MAX_UPLOAD_BYTES` | 25 MiB | `cityjson_import_text` size limit. |
+| `CITYJSON_MCP_MAX_DIRECT_UPLOAD_BYTES` | 100 MiB | In-chat file picker upload size limit. |
 | `CITYJSON_MCP_MAX_DOWNLOAD_BYTES` | 25 MiB | Standalone inline download limit. |
 | `CJIO_BIN` | `cjio` | cjio executable override. |
 | `CJVAL_BIN` | `cjval` | cjval executable override. |

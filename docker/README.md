@@ -31,7 +31,7 @@ docker build -f docker/Dockerfile --target cjval-builder \
   -t cityjson-mcp-cjval-builder .
 ```
 
-Claude Desktop can launch the published image over stdio. Replace the source path with the absolute directory containing the CityJSON files:
+Claude Desktop can launch the published image over stdio without configuring a project folder:
 
 ```json
 {
@@ -43,11 +43,7 @@ Claude Desktop can launch the published image over stdio. Replace the source pat
         "--rm",
         "-i",
         "--mount",
-        "type=bind,source=/absolute/path/to/cityjson-files,target=/input,readonly",
-        "--env",
-        "CITYJSON_MCP_ALLOWED_ROOTS=/input:/data",
-        "--env",
-        "CITYJSON_MCP_INPUT=/input",
+        "type=volume,source=cityjson-mcp-data,target=/data",
         "yarroudh/cityjson-mcp:latest"
       ]
     }
@@ -55,9 +51,9 @@ Claude Desktop can launch the published image over stdio. Replace the source pat
 }
 ```
 
-Use inbox filenames with `cityjson_import`; `cityjson_list_imports` discovers them without exposing absolute paths. The mount is read only. Derived datasets and reports are written to `/data` inside Docker. Use `cityjson_download` to return a result to the client.
+Ask to upload a CityJSON file and summarize it. `cityjson_upload` opens a file picker inside MCP Apps compatible clients; select or drop the file there. The app streams chunks to the server outside the model context and continues using the filename. The workspace is created automatically in the Docker volume. Use `cityjson_download` to return a result to the client.
 
-`cityjson_import_text` is available only for small JSON documents already present as text. Chat paths such as `/mnt/user-data/...` do not exist inside this container.
+Chat composer attachments are not automatically handed to MCP servers. The CityJSON picker is the direct upload route in clients that support MCP Apps. `cityjson_import_text` is a fallback for small JSON already available as text. To open existing local files by name, optionally mount their folder read-only at `/project` and set `CITYJSON_MCP_ALLOWED_ROOTS=/project`.
 
 For direct browser attachments, start the included one-page chat application:
 

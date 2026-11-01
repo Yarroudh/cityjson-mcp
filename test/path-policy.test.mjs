@@ -33,6 +33,9 @@ test('PathPolicy permits configured root and rejects outside files', async () =>
     await fs.writeFile(inboxFile, '{}');
     assert.equal(policy.inputPath('inbox.city.json'), await fs.realpath(inboxFile));
     assert.throws(() => policy.inputPath('../outside/b.city.json'), /filename.*not a path/);
+    const linkedOutside = path.join(allowed, 'linked.city.json');
+    await fs.symlink(outsideFile, linkedOutside);
+    assert.throws(() => policy.assertReadable(linkedOutside), /outside allowed roots/);
   } finally {
     if (oldRoots === undefined) delete process.env.CITYJSON_MCP_ALLOWED_ROOTS; else process.env.CITYJSON_MCP_ALLOWED_ROOTS = oldRoots;
     if (oldInput === undefined) delete process.env.CITYJSON_MCP_INPUT; else process.env.CITYJSON_MCP_INPUT = oldInput;

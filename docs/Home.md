@@ -18,9 +18,9 @@ CityJSON MCP gives an AI client controlled access to CityJSON inspection, valida
 
 ## What the project provides
 
-CityJSON MCP exposes 37 tools through the Model Context Protocol. Together they can:
+CityJSON MCP exposes 38 user-facing tools through the Model Context Protocol, including direct upload in MCP Apps compatible clients. Together they can:
 
-* Import CityJSON from an inbox, text, an allowed path, or a remote URL.
+* Import CityJSON through an in-chat file picker, complete small JSON text, an inbox, or an allowed path.
 * Inspect metadata, object types, attributes, levels of detail, and individual CityObjects.
 * Query by identifiers, object types, bounding boxes, radius, and attributes.
 * Validate schemas with cjval and geometry with val3dity.
@@ -32,6 +32,10 @@ CityJSON MCP exposes 37 tools through the Model Context Protocol. Together they 
 * Read CityJSON specifications, schemas, and extension information.
 
 Datum adds a visual workflow around these tools. It provides file import, conversations, suggested questions, live tool progress, downloads, model management, and a Three.js viewer.
+
+## Uploading files in Claude Desktop and IDEs
+
+If a client gives the model the complete text of a small JSON attachment, CityJSON MCP can import it immediately under its filename. For a larger file, use the [MCP Apps](https://apps.extensions.modelcontextprotocol.io/api/documents/quickstart.html) CityJSON upload panel to choose or drop it. A file attached to the chat composer is not automatically transferred to an MCP server; general file transfer is still being developed as an [MCP extension](https://github.com/modelcontextprotocol/experimental-ext-file-uploads). See [installation and configuration](Installation) for the no-folder setup.
 
 ## How the pieces connect
 
@@ -51,11 +55,11 @@ flowchart TD
     E --> F
 ```
 
-The language model decides which MCP tool to call. The MCP server validates the parameters, runs the relevant implementation, and returns structured results. Datum shows progress and keeps the current dataset handle attached to the conversation.
+The language model decides which MCP tool to call. The MCP server validates the parameters, runs the relevant implementation, and returns structured results. Datum shows progress and keeps the current file attached to the conversation.
 
 ## Dataset handles
 
-An imported file receives a dataset handle. Inspection tools read that handle. Transformation tools create a new handle and leave the source dataset unchanged. Datum follows the newest handle in the conversation, so the viewer and download action use the current result.
+The server tracks each imported file internally by a dataset handle. The user sees and refers to its filename. Transformations create a new named file and leave the source unchanged. Datum follows the newest file in the conversation, so the viewer and download action use the current result.
 
 This design allows a sequence such as subset, reproject, validate, and download without overwriting the imported file.
 

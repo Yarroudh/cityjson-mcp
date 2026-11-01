@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/Node.js-20%2B-339933.svg" alt="Node.js 20 or newer">
   <img src="https://img.shields.io/badge/CityJSON-2.0.2-e0a05b.svg" alt="CityJSON 2.0.2">
-  <img src="https://img.shields.io/badge/MCP_tools-37-5c6ac4.svg" alt="37 MCP tools">
+  <img src="https://img.shields.io/badge/MCP_tools-38-5c6ac4.svg" alt="38 MCP tools">
   <a href="https://hub.docker.com/r/yarroudh/cityjson-mcp"><img src="https://img.shields.io/badge/Docker-yarroudh%2Fcityjson--mcp-2496ed.svg" alt="Docker image"></a>
   <a href="https://doi.org/10.5281/zenodo.22151334"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.22151334.svg" alt="DOI"></a>
   <a href="https://github.com/Yarroudh/cityjson-mcp/wiki"><img src="https://img.shields.io/badge/docs-Wiki-181717.svg" alt="Wiki"></a>
@@ -35,7 +35,7 @@ The Docker image includes:
     - [Cloud model providers](#cloud-model-providers)
       - [Recommended free cloud models through OpenRouter](#recommended-free-cloud-models-through-openrouter)
       - [OpenAI GPT Nano](#openai-gpt-nano)
-      - [Other OpenAI-compatible providers](#other-openai-compatible-providers)
+      - [Other providers compatible with OpenAI](#other-providers-compatible-with-openai)
     - [Recommended cloud configurations](#recommended-cloud-configurations)
     - [Local models with Ollama](#local-models-with-ollama)
     - [Other model services](#other-model-services)
@@ -43,13 +43,12 @@ The Docker image includes:
     - [Optional: build the image locally](#optional-build-the-image-locally)
 - [Use the MCP server without Datum](#use-the-mcp-server-without-datum)
   - [Pull and verify the image](#pull-and-verify-the-image)
-  - [Configure a file inbox](#configure-a-file-inbox)
+  - [Upload a file from Claude Desktop or another MCP client](#upload-a-file-from-claude-desktop-or-another-mcp-client)
   - [Claude Desktop](#claude-desktop)
   - [Claude Code](#claude-code)
   - [Cursor](#cursor)
   - [VS Code](#vs-code)
   - [Other MCP clients](#other-mcp-clients)
-- [File and dataset handling](#file-and-dataset-handling)
 - [Architecture](#architecture)
 - [Tool catalog](#tool-catalog)
   - [Dataset management and inspection](#dataset-management-and-inspection)
@@ -138,7 +137,7 @@ The model settings mean:
 
 | Variable | Required | Description |
 |---|---:|---|
-| `MODEL_PROVIDER` | yes | Model service: `ollama`, `openrouter`, `openai`, or `anthropic`. Ollama, OpenRouter, and OpenAI-compatible services use the OpenAI Chat Completions format internally. |
+| `MODEL_PROVIDER` | yes | Model service: `ollama`, `openrouter`, `openai`, or `anthropic`. Ollama, OpenRouter, and services compatible with OpenAI use the OpenAI Chat Completions format internally. |
 | `MODEL_NAME` | yes | Exact model identifier sent to the provider, for example `openrouter/free`. The model must support tool calls. |
 | `MODEL_API_KEY` | except Ollama | API credential issued by the model provider. Local Ollama needs no key. Do not commit `.env`. |
 | `MODEL_BASE_URL` | yes | Base URL for the provider API. |
@@ -149,7 +148,7 @@ The `.env` model is the default model in Datum. Users can add other models from 
 
 #### Cloud model providers
 
-Datum supports OpenRouter, OpenAI-compatible APIs, and Anthropic as cloud providers. Credentials stay in the running application and are not passed to MCP tools. Datum runs a live tool-call check before accepting any model because catalog metadata alone does not guarantee reliable agent behavior.
+Datum supports OpenRouter, APIs compatible with OpenAI, and Anthropic as cloud providers. Credentials stay in the running application and are not passed to MCP tools. Datum checks whether each model can call a tool before accepting it because catalog metadata alone does not guarantee reliable agent behavior.
 
 ##### Recommended free cloud models through OpenRouter
 
@@ -165,7 +164,7 @@ MODEL_BASE_URL=https://openrouter.ai/api/v1
 MODEL_TEMPERATURE=0.1
 ```
 
-This is Datum's recommended free-cloud configuration. It avoids depending on one free provider's capacity, but the selected model can vary between calls. Free usage is intended for experimentation and low-volume work, is rate-limited, and may be less predictable than paid inference. You can still select a specific `:free` model when model consistency matters more than automatic availability.
+This is Datum's recommended configuration for a free cloud model. It avoids depending on one provider's free capacity, but the selected model can vary between calls. Free usage is intended for experimentation and small workloads, has rate limits, and may be less predictable than paid inference. You can still select a specific `:free` model when model consistency matters more than automatic availability.
 
 ##### OpenAI GPT Nano
 
@@ -180,23 +179,23 @@ MODEL_BASE_URL=https://api.openai.com/v1
 
 GPT-5 Nano supports function calling but the OpenAI API does not provide it on the free usage tier. It is inexpensive and useful for testing, although a stronger coding model may be more reliable for long CityJSON tool workflows.
 
-##### Other OpenAI-compatible providers
+##### Other providers compatible with OpenAI
 
-For any service exposing an OpenAI-compatible Chat Completions endpoint, choose **OpenAI-compatible API**, then enter the provider's exact model ID, API key, and base URL. This covers services such as Gemini and DeepSeek without hard-coding a changing provider directory. Services requiring a different protocol, OAuth flow, or custom request headers are not automatically compatible.
+For any service with an API compatible with OpenAI Chat Completions, choose the OpenAI API option in Datum, then enter the provider's exact model ID, API key, and base URL. This covers services such as Gemini and DeepSeek without maintaining a provider directory in the code. Services requiring a different protocol, OAuth flow, or custom request headers are not automatically compatible.
 
 `MODEL_API_KEY` takes precedence for the default model. Datum also recognizes `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` for their matching `MODEL_PROVIDER`. All of these model credentials are removed from the environment passed to the MCP subprocess.
 
 #### Recommended cloud configurations
 
-For free experimentation, use `openrouter/free` as shown above. OpenRouter chooses a currently available free model and filters for capabilities required by the request. Its free tier has limited request quotas and free-provider capacity can fluctuate.
+For free experimentation, use `openrouter/free` as shown above. OpenRouter chooses a currently available free model and filters for capabilities required by the request. Its free tier has limited request quotas, and capacity can fluctuate between providers.
 
-For the best reliability and more demanding CityJSON tool workflows, use a paid Gemini or DeepSeek model through its OpenAI-compatible endpoint. Choose **OpenAI / compatible API** in Datum and enter the provider's model ID, API key, and base URL. Paid models avoid the tight shared-capacity limits of free endpoints and keep the model stable throughout a conversation.
+For the best reliability and more demanding CityJSON tool workflows, use a paid Gemini or DeepSeek model through its API that is compatible with OpenAI. Choose the OpenAI API option in Datum and enter the provider's model ID, API key, and base URL. Paid models avoid the tight capacity limits of free endpoints and keep the model stable throughout a conversation.
 
 Google API keys are managed in [Google AI Studio](https://aistudio.google.com/app/apikey); see Google's [OpenAI compatibility guide](https://ai.google.dev/gemini-api/docs/openai) and [pricing](https://ai.google.dev/gemini-api/docs/pricing). For DeepSeek, use its [API documentation and pricing](https://api-docs.deepseek.com/quick_start/pricing/). Review each provider's data policy before sending confidential CityJSON datasets.
 
 #### Local models with Ollama
 
-Ollama is an optional companion service. A normal `npm run chat` enables it automatically only when `.env` has `MODEL_PROVIDER=ollama`. Cloud-model configurations start Datum without inspecting, pulling, or starting the Ollama image. The launcher prints the selected mode before it checks Docker images.
+Ollama is an optional companion service. A normal `npm run chat` enables it automatically only when `.env` has `MODEL_PROVIDER=ollama`. Configurations with a cloud model start Datum without inspecting, pulling, or starting the Ollama image. The launcher prints the selected mode before it checks Docker images.
 
 Override the automatic choice when needed:
 
@@ -208,7 +207,7 @@ npm run chat -- --with-ollama
 npm run chat -- --without-ollama
 ```
 
-For a persistent setting, use `CHAT_ENABLE_OLLAMA=true` or `CHAT_ENABLE_OLLAMA=false` in `.env`. Command-line flags take precedence. If Ollama is enabled, no separate installation is required: the launcher first looks for native Ollama on macOS and otherwise pulls the official image when missing. Docker model downloads remain in the `ollama-models` volume.
+For a persistent setting, use `CHAT_ENABLE_OLLAMA=true` or `CHAT_ENABLE_OLLAMA=false` in `.env`. Command line flags take precedence. If Ollama is enabled, no separate installation is required: the launcher first looks for native Ollama on macOS and otherwise pulls the official image when missing. Docker model downloads remain in the `ollama-models` volume.
 
 To make an Ollama model the default, configure `.env`:
 
@@ -240,7 +239,7 @@ Datum can use any model that supports `tool calls` through one of its two API fo
 | Service | `MODEL_PROVIDER` | Example model | `MODEL_BASE_URL` |
 |---|---|---|---|
 | Ollama | `ollama` | `qwen3:8b` | `http://ollama:11434/v1` |
-| OpenRouter | `openrouter` | select a tool-capable model from the live catalog | `https://openrouter.ai/api/v1` |
+| OpenRouter | `openrouter` | select a model that supports tools from the live catalog | `https://openrouter.ai/api/v1` |
 | Google Gemini | `openai` | `gemini-3.7-flash` | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | DeepSeek | `openai` | `deepseek-v4-pro` | `https://api.deepseek.com` |
 | OpenAI GPT | `openai` | a current GPT model with Chat Completions tool calling | `https://api.openai.com/v1` |
@@ -269,10 +268,10 @@ npm run chat:logs
 npm run chat:stop
 ```
 
-`npm run chat` uses this image-selection sequence:
+`npm run chat` uses this sequence to select images:
 
 1. Read `.env` and resolve Ollama mode from `--with-ollama`, `--without-ollama`, `CHAT_ENABLE_OLLAMA`, or `MODEL_PROVIDER`, in that order.
-2. Print whether startup is cloud-only, native Ollama, or bundled Ollama.
+2. Print whether startup uses a cloud model, native Ollama, or bundled Ollama.
 3. If Ollama is enabled on macOS, use a running native service when detected; otherwise pull the official Ollama image only when it is missing.
 4. Check whether the CityJSON MCP image exists and pull it when missing.
 5. Start Datum and, when selected, its Ollama companion in detached mode without building an image.
@@ -310,9 +309,9 @@ docker run --rm --entrypoint node yarroudh/cityjson-mcp:latest /app/scripts/doct
 
 The doctor command should report `OK` for `cjio`, `cjval`, `val3dity`, `citygml-tools`, and `cjdb`.
 
-### Configure a file inbox
+### Upload a file from Claude Desktop or another MCP client
 
-MCP tool calls do not contain ordinary chat attachments. Mount a host folder as `/input` for files that must be available to the MCP server. Replace `/absolute/path/to/cityjson-files` with an existing absolute path:
+The default setup needs no project folder. Add this server configuration:
 
 ```json
 {
@@ -324,11 +323,7 @@ MCP tool calls do not contain ordinary chat attachments. Mount a host folder as 
         "--rm",
         "-i",
         "--mount",
-        "type=bind,source=/absolute/path/to/cityjson-files,target=/input,readonly",
-        "--env",
-        "CITYJSON_MCP_ALLOWED_ROOTS=/input:/data",
-        "--env",
-        "CITYJSON_MCP_INPUT=/input",
+        "type=volume,source=cityjson-mcp-data,target=/data",
         "yarroudh/cityjson-mcp:latest"
       ]
     }
@@ -336,17 +331,19 @@ MCP tool calls do not contain ordinary chat attachments. Mount a host folder as 
 }
 ```
 
-Place `model.city.json` in the mounted folder, then ask the client:
+Then ask the client:
 
-> Import `model.city.json` and summarize it.
+> Upload my CityJSON file and summarize its buildings.
 
-The model should call `cityjson_import` with the filename. It should not send the full file through `cityjson_import_text`.
+The `cityjson_upload` tool opens a file picker in MCP Apps compatible clients, including Claude Desktop. Choose or drop the file there. The app transfers the file in chunks directly to the MCP server, then continues the question using the file's name. The model does not receive the full CityJSON text. Docker creates the storage volume automatically.
 
-Paths created by a chat client, such as `/mnt/user-data/...`, do not automatically exist in the MCP container.
+Attaching a file to the chat composer is a separate client feature. If the client gives the model the complete text of a small JSON attachment, `cityjson_import_text` can use it immediately with its original filename; you do not need to select it again. For larger files, choose the file in the CityJSON upload panel: chat attachments are not automatically passed to an MCP server. [MCP Apps](https://apps.extensions.modelcontextprotocol.io/api/documents/quickstart.html) provides this panel inside the chat, while general file transfer is still being developed as an [MCP extension](https://github.com/modelcontextprotocol/experimental-ext-file-uploads). Clients without MCP Apps support can configure a shared folder for larger files. Datum's browser upload works directly without this panel.
+
+To let the server open files already present in a project folder, add an optional bind mount with read only access, such as `--mount type=bind,source=/absolute/path/to/project,target=/project,readonly`, and set `CITYJSON_MCP_ALLOWED_ROOTS=/project`. Then ask about the file by name; `cityjson_open` finds and snapshots it. Files in subfolders can also be found by name, and duplicate names can be disambiguated with a relative path.
 
 ### Claude Desktop
 
-The template is [config/claude-desktop.json](config/claude-desktop.json). Add the inbox mount from the previous example when working with files.
+The template needs no folder configuration: [config/claude-desktop.json](config/claude-desktop.json).
 
 Claude Desktop configuration locations:
 
@@ -363,7 +360,7 @@ Copy the template into the project where Claude Code runs:
 cp config/claude-code.json .mcp.json
 ```
 
-Add the inbox mount to `.mcp.json` when required, then restart or reconnect the MCP server.
+Restart or reconnect the MCP server after adding `.mcp.json`.
 
 ### Cursor
 
@@ -378,7 +375,7 @@ Restart the MCP server after changing the file.
 
 ### VS Code
 
-The template is [config/vscode-mcp.json](config/vscode-mcp.json). Copy its `servers.cityjson` entry into `.vscode/mcp.json`, then start or restart the server from the MCP server-management commands in VS Code.
+The template is [config/vscode-mcp.json](config/vscode-mcp.json). Copy its `servers.cityjson` entry into `.vscode/mcp.json`, then start or restart the server from the MCP server management commands in VS Code.
 
 ### Other MCP clients
 
@@ -388,7 +385,7 @@ Use this command for any client that supports a local stdio MCP server:
 docker run --rm -i yarroudh/cityjson-mcp:latest
 ```
 
-Add the `/input` mount shown above when the server must read local files.
+Add the optional `/project` mount shown above when the server must read existing local files directly.
 
 ---
 
@@ -438,7 +435,7 @@ flowchart LR
 
 ## Tool catalog
 
-The server exposes 37 tools.
+The standalone server exposes 38 tools to users. Datum uses its 37 tools and its own browser upload.
 
 For complete parameter schemas, backend behavior, return values, and example workflows, see the [CityJSON MCP tools reference](docs/CityJSON-MCP-Tools.md).
 
@@ -448,9 +445,10 @@ For complete parameter schemas, backend behavior, return values, and example wor
 |---|---|---|
 | `cityjson_backend_status` | native | Report backend availability and path settings. |
 | `cityjson_list_imports` | native | List JSON files in the input directory. |
-| `cityjson_import` | native | Import an input file and return a `dataset_id`. |
+| `cityjson_import` | native | Register a file delivered to Datum's input inbox. |
+| `cityjson_upload` | native | Show a file picker in the chat and upload directly to the MCP server. |
 | `cityjson_import_text` | native | Import a small CityJSON document supplied as text. |
-| `cityjson_open` | native | Open a CityJSON file from an authorized path. |
+| `cityjson_open` | native | Open a project file by name or path and snapshot it. |
 | `cityjson_download` | native | Return a source or derived CityJSON file. |
 | `cityjson_save` | native | Copy a dataset to an authorized destination. |
 | `cityjson_info` | native | Return version, counts, LoDs, attributes, metadata, transform, and extensions. |
@@ -468,7 +466,7 @@ For complete parameter schemas, backend behavior, return values, and example wor
 
 ### Transformations
 
-Each tool in this table returns a new dataset handle.
+Each tool in this table returns a new filename for the derived CityJSON file.
 
 | Tool | Backend | Purpose |
 |---|---|---|
@@ -512,29 +510,29 @@ Each tool in this table returns a new dataset handle.
 
 ### Inspect a file
 
-> Import `model.city.json`. Report the version, CRS, object counts by type, LoDs, attributes, and extensions. Do not modify the dataset.
+> Report the version, CRS, object counts by type, LoDs, attributes, and extensions in `model.city.json`. Do not modify the file.
 
-Expected tools: `cityjson_import`, `cityjson_info`.
+Expected tools: `cityjson_open`, `cityjson_info`.
 
 ### Validate a file
 
-> Import `model.city.json`. Run structural and geometric validation. Separate cjval findings from val3dity findings and list affected object IDs.
+> Run structural and geometric validation on `model.city.json`. Separate cjval findings from val3dity findings and list affected object IDs.
 
-Expected tools: `cityjson_import`, `cityjson_validate`.
+Expected tools: `cityjson_open`, `cityjson_validate`.
 
 ### Create a subset
 
-> Import `model.city.json`. Keep Building and BuildingPart objects inside bbox `[85000, 446000, 86000, 447000]`, keep LoD 2.2, reproject to EPSG:28992, validate the result, and give me the resulting file.
+> In `model.city.json`, keep Building and BuildingPart objects inside bbox `[85000, 446000, 86000, 447000]`, keep LoD 2.2, reproject to EPSG:28992, validate the result, and give me the resulting file.
 
-Expected tools: `cityjson_import`, `cityjson_subset`, `cityjson_filter_lod`, `cityjson_reproject`, `cityjson_validate`, `cityjson_download`.
+Expected tools: `cityjson_open`, `cityjson_subset`, `cityjson_filter_lod`, `cityjson_reproject`, `cityjson_validate`, `cityjson_download`.
 
 ### Clean and download
 
-> Import `model.city.json`. Remove duplicate and unused vertices, validate the derived dataset, and return it as `tile-clean.city.json`. Do not overwrite the source.
+> Remove duplicate and unused vertices from `model.city.json`, validate the result, and return it as `tile-clean.city.json`. Do not overwrite the source.
 
-Expected tools: `cityjson_import`, `cityjson_clean_vertices`, `cityjson_validate`, `cityjson_download`.
+Expected tools: `cityjson_open`, `cityjson_clean_vertices`, `cityjson_validate`, `cityjson_download`.
 
-> In Datum, you can ignore the first instruction, **Import `<filename>`**, since file attachments are handled automatically. There is no need to manually place your models in the `input/` folder. You can import a CityJSON file directly using the **Import CityJSON** button or by dragging and dropping the file.
+> In Datum, attach a CityJSON file directly using the **Import CityJSON** button or drag and drop. Datum registers it automatically.
 
 ---
 
@@ -553,11 +551,12 @@ Expected tools: `cityjson_import`, `cityjson_clean_vertices`, `cityjson_validate
 | `CHAT_PORT` | `3000` | Datum port. |
 | `CHAT_MAX_UPLOAD_BYTES` | `1073741824` | Maximum upload size. |
 | `CHAT_MAX_UPLOAD_FILES` | `5` | Maximum files per upload. |
-| `CHAT_MAX_TOOL_ROUNDS` | `12` | Maximum tool-call rounds per response. |
+| `CHAT_MAX_TOOL_ROUNDS` | `12` | Maximum rounds of tool calls per response. |
 | `CITYJSON_MCP_ALLOWED_ROOTS` | current directory | Authorized filesystem roots. Use `:` on macOS/Linux and `;` on Windows. |
 | `CITYJSON_MCP_INPUT` | `./input` | Input directory used by `cityjson_import`. |
 | `CITYJSON_MCP_WORKSPACE` | `./.cityjson-mcp-workspace` | Managed source and derived datasets. |
 | `CITYJSON_MCP_COMMAND_TIMEOUT_MS` | `120000` | External command timeout. |
+| `CITYJSON_MCP_MAX_DIRECT_UPLOAD_BYTES` | `104857600` | Maximum file size for the CityJSON picker in the chat. |
 | `CITYJSON_MCP_MAX_DOWNLOAD_BYTES` | `26214400` | Maximum inline MCP download size. Datum streams downloads directly. |
 | `CJIO_BIN` | `cjio` | Optional cjio executable override. |
 | `CJVAL_BIN` | `cjval` | Optional cjval executable override. |
@@ -644,7 +643,7 @@ Use `npm run chat:host` only when all required backends are installed locally. D
 
 1. Fork the repository and create a branch for one change.
 2. Install dependencies with `npm install`.
-3. Make the change. Keep MCP tool inputs typed and do not add shell-string execution.
+3. Make the change. Keep MCP tool inputs typed and do not run shell commands from strings.
 4. Add or update tests for changed behavior.
 5. Run:
 
@@ -654,7 +653,7 @@ Use `npm run chat:host` only when all required backends are installed locally. D
    ```
 
 6. If the change affects a Docker backend, build the image and run `npm run docker:doctor`.
-7. Update the README and `.env.example` when configuration or user-visible behavior changes.
+7. Update the README and `.env.example` when configuration or behavior visible to users changes.
 8. Open a pull request that states what changed, why it changed, and how it was tested.
 
 Do not include API keys, database passwords, private CityJSON datasets, generated workspaces, or `.env` files in a contribution.
@@ -694,7 +693,7 @@ npm run docker:doctor
 
 ## Known limitations
 
-- Dataset handles are scoped to the current process. If the MCP server restarts, any existing `dataset_id` values become invalid and must be recreated.
+- Dataset handles are restored after a restart when the managed workspace is persisted. Without a persistent workspace, opened and derived files from the old container are unavailable.
 - Native inspection loads regular CityJSON files into memory.
 - `cityjson_query` computes bounding boxes from geometry stored directly on each object. It does not combine all child geometry into a parent bounding box.
 - Specification, schema, and extension lookup tools require network access, except for `cityjson_spec_outline`.
@@ -726,21 +725,21 @@ This project builds on and integrates with several projects and specifications f
 
 ### CityJSON
 
-- [CityJSON specification](https://www.cityjson.org/specs/) — Official CityJSON specification and documentation.
-- [CityJSON specification repository](https://github.com/cityjson/specs) — Source repository for the CityJSON specification.
-- [CityJSON Extensions registry](https://github.com/cityjson/extensions) — Registry of CityJSON extensions maintained by the community.
+- [CityJSON specification](https://www.cityjson.org/specs/): Official CityJSON specification and documentation.
+- [CityJSON specification repository](https://github.com/cityjson/specs): Source repository for the CityJSON specification.
+- [CityJSON Extensions registry](https://github.com/cityjson/extensions): Registry of CityJSON extensions maintained by the community.
 
 ### CityJSON Tools
 
-- [cjio](https://github.com/cityjson/cjio) — Command line tools and Python utilities for working with CityJSON.
-- [cjval](https://github.com/cityjson/cjval) — Validation tools for CityJSON datasets.
-- [cjdb](https://github.com/cityjson/cjdb) — Database tools for storing and querying CityJSON data.
-- [val3dity](https://github.com/tudelft3d/val3dity) — Validation of 3D geometries and 3D city models.
-- [citygml-tools](https://github.com/citygml4j/citygml-tools) — Command line tools for processing and converting CityGML datasets.
+- [cjio](https://github.com/cityjson/cjio): Command line tools and Python utilities for working with CityJSON.
+- [cjval](https://github.com/cityjson/cjval): Validation tools for CityJSON datasets.
+- [cjdb](https://github.com/cityjson/cjdb): Database tools for storing and querying CityJSON data.
+- [val3dity](https://github.com/tudelft3d/val3dity): Validation of 3D geometries and 3D city models.
+- [citygml-tools](https://github.com/citygml4j/citygml-tools): Command line tools for processing and converting CityGML datasets.
 
 ### Model Context Protocol
 
-- [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) — TypeScript SDK for implementing Model Context Protocol servers and clients.
+- [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk): TypeScript SDK for implementing Model Context Protocol servers and clients.
 
 > These projects are developed and maintained independently by their respective authors and communities. Please refer to their repositories for documentation, licensing, and support.
 

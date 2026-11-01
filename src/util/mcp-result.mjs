@@ -1,7 +1,9 @@
 export function jsonResult(value, extra = {}) {
+  const publicValue = JSON.parse(JSON.stringify(value, (key, item) =>
+    ['datasetId', 'parentDatasetIds', 'path', 'sourcePath', 'sourceFilename'].includes(key) ? undefined : item));
   return {
-    content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
-    structuredContent: value,
+    content: [{ type: 'text', text: JSON.stringify(publicValue, null, 2) }],
+    structuredContent: publicValue,
     ...extra
   };
 }

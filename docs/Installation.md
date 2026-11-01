@@ -263,9 +263,9 @@ docker run --rm -i yarroudh/cityjson-mcp:latest
 
 The `-i` option is required because MCP communication uses standard input and output. Do not add a terminal allocation option.
 
-### Add an input inbox and persistent workspace
+### Upload directly from an MCP client
 
-Create a folder for CityJSON files and use its absolute path:
+The default client configuration needs no project folder:
 
 ```json
 {
@@ -277,15 +277,7 @@ Create a folder for CityJSON files and use its absolute path:
         "--rm",
         "-i",
         "--mount",
-        "type=bind,source=/absolute/path/to/cityjson-files,target=/input,readonly",
-        "--mount",
         "type=volume,source=cityjson-mcp-data,target=/data",
-        "--env",
-        "CITYJSON_MCP_ALLOWED_ROOTS=/input:/data",
-        "--env",
-        "CITYJSON_MCP_INPUT=/input",
-        "--env",
-        "CITYJSON_MCP_WORKSPACE=/data/.cityjson-mcp-workspace",
         "yarroudh/cityjson-mcp:latest"
       ]
     }
@@ -293,13 +285,19 @@ Create a folder for CityJSON files and use its absolute path:
 }
 ```
 
-The host folder is read only in this example. Derived datasets are stored in the Docker volume mounted at `/data`.
+Ask the assistant to upload a CityJSON file and answer your question. In MCP Apps compatible clients, `cityjson_upload` opens a file picker inside the conversation. Choose or drop the file there; the app sends its bytes in chunks directly to the server, then continues with its filename. Docker creates the managed workspace and volume automatically. There is no project directory to configure.
+
+If the client gives the model the complete text of a small JSON attachment, `cityjson_import_text` can import it directly under its original filename; there is no need to select it again. For larger files, choose the file in the CityJSON upload panel: attaching it to the chat composer does not automatically transfer its bytes to an MCP server. [MCP Apps](https://apps.extensions.modelcontextprotocol.io/api/documents/quickstart.html) supplies the in-chat panel; general file transfer is still being developed as an [MCP extension](https://github.com/modelcontextprotocol/experimental-ext-file-uploads). A shared folder remains an option in clients without MCP Apps support.
+
+### Optionally share a project folder
+
+To open files already present in a project directory, add a read-only bind mount such as `--mount type=bind,source=/absolute/path/to/project,target=/project,readonly` and set `CITYJSON_MCP_ALLOWED_ROOTS=/project` in the client command. Then ask the assistant about the file by name. `cityjson_open` snapshots it into the managed workspace. If names collide, use a path relative to the mounted folder.
 
 Add another bind mount at `/output` and include it in `CITYJSON_MCP_ALLOWED_ROOTS` when tools must save directly into a host folder. Do not remove the read only option from an input folder unless writes are intentional.
 
 On Windows, JSON strings must escape backslashes. Forward slash paths such as `C:/CityJSON/input` are often easier to read in client configuration.
 
-Files created in an AI client sandbox do not automatically exist inside the MCP container. Copy the file into the mounted inbox, then call `cityjson_import` with its filename.
+Datum provides its own upload bridge for browser attachments.
 
 ### Client configuration locations
 
@@ -544,6 +542,7 @@ Datum also recognizes `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API
 | `CITYJSON_MCP_WORKSPACE` | `./.cityjson-mcp-workspace` | Managed sources, derived files, reports, and registry |
 | `CITYJSON_MCP_COMMAND_TIMEOUT_MS` | `120000` | External command timeout |
 | `CITYJSON_MCP_MAX_UPLOAD_BYTES` | 25 MiB | Limit for inline `cityjson_import_text` content |
+| `CITYJSON_MCP_MAX_DIRECT_UPLOAD_BYTES` | 100 MiB | Limit for the in-chat file picker upload |
 | `CITYJSON_MCP_MAX_DOWNLOAD_BYTES` | 25 MiB | Standalone inline download limit |
 | `CJIO_BIN` | `cjio` | cjio executable or absolute path |
 | `CJVAL_BIN` | `cjval` | cjval executable or absolute path |
@@ -642,7 +641,7 @@ For bundled Ollama, use `http://ollama:11434/v1` inside Compose. For direct host
 
 ### A CityJSON file is not visible to an MCP client
 
-Confirm that the file is inside the host folder mounted at `/input`. Call `cityjson_list_imports`, then call `cityjson_import` with the filename only. Host paths and AI client sandbox paths do not automatically exist in the container.
+Use `cityjson_upload` to choose or drop a file in the in-chat upload panel. If using `cityjson_open`, confirm that the file is inside the optional host folder mounted at `/project`; duplicate names require a relative path. Files attached to the chat composer are not automatically visible inside the container.
 
 ### A backend is missing
 
@@ -674,5 +673,5 @@ Restart Datum and refresh the page. Application assets use versioned URLs and ar
 ## Next steps
 
 * Open the [Datum guide](Datum) for the complete interface workflow.
-* Review the [37 MCP tools](CityJSON-MCP-Tools).
+* Review the [MCP tools](CityJSON-MCP-Tools).
 * Return to the [Wiki Home](Home).

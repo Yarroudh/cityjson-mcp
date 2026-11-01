@@ -92,7 +92,8 @@ export class McpGateway {
     });
     this.client = new Client({ name: 'cityjson-chat', version: '0.1.0' });
     await this.client.connect(this.transport);
-    this.tools = (await this.client.listTools()).tools;
+    // Datum has its own upload UI. MCP App tools belong to external clients.
+    this.tools = (await this.client.listTools()).tools.filter(tool => !tool._meta?.ui);
   }
 
   async call(name, args = {}, { signal, onProgress } = {}) {
@@ -112,7 +113,11 @@ export class McpGateway {
     return {
       isError: raw.isError === true,
       modelContent: modelSafeResult(raw, this.maxToolResultChars),
-      structuredContent: raw.structuredContent,
+      // Datum stores a file reference in its existing datasetId state field.
+      // MCP clients receive only the filename in the tool response.
+      structuredContent: raw.structuredContent?.derived?.filename || raw.structuredContent?.filename
+        ? { ...raw.structuredContent, datasetId: raw.structuredContent.derived?.filename || raw.structuredContent.filename }
+        : raw.structuredContent,
       downloads: downloadableResources(raw)
     };
   }

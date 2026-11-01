@@ -54,13 +54,61 @@ export class DatasetManager {
 
   id() { return `cj_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`; }
 
+  uniqueFilename(requested) {
+    if (![...this.datasets.values()].some(dataset => dataset.filename === requested)) return requested;
+    const extension = requested.toLowerCase().endsWith('.city.json') ? '.city.json' : path.extname(requested);
+    const stem = extension ? requested.slice(0, -extension.length) : requested;
+    return `${stem}-${crypto.randomUUID().slice(0, 8)}${extension}`;
+  }
+
+  async resolveOpenSource(source) {
+    if (typeof source !== 'string' || !source.trim()) throw new Error('A CityJSON filename is required');
+    if (path.isAbsolute(source)) return this.pathPolicy.assertReadable(source);
+    const relative = path.normalize(source.trim());
+    if (relative === '..' || relative.startsWith(`..${path.sep}`)) throw new Error('File must be inside a configured data folder');
+    const roots = this.pathPolicy.roots || [];
+    const candidates = [];
+    const add = candidate => {
+      if (!fsSync.existsSync(candidate)) return;
+      const checked = this.pathPolicy.assertReadable(candidate);
+      if (fsSync.statSync(checked).isFile() && !candidates.includes(checked)) candidates.push(checked);
+    };
+    for (const root of roots) add(path.join(root, relative));
+    if (path.basename(relative) === relative) {
+      const pending = roots.filter(root => fsSync.existsSync(root));
+      let scanned = 0;
+      while (pending.length) {
+        const directory = pending.shift();
+        for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+          if (++scanned > 50000) throw new Error('Too many project files to search; use a relative path inside the mounted folder');
+          if (entry.isDirectory() && !['.git', 'node_modules', '.cityjson-mcp-workspace'].includes(entry.name)) {
+            pending.push(path.join(directory, entry.name));
+          } else if (entry.isFile() && entry.name === relative) {
+            add(path.join(directory, entry.name));
+          }
+        }
+      }
+    }
+    if (!candidates.length) throw new Error(`CityJSON file not found in configured data folders: ${source}`);
+    if (candidates.length > 1) throw new Error(`More than one file is named ${source}; use its relative path inside the mounted folder`);
+    return candidates[0];
+  }
+
   async open(source) {
-    const filePath = this.pathPolicy.assertReadable(source);
-    const json = await readCityJSON(filePath);
-    const stat = await fs.stat(filePath);
-    const id = this.id();
-    await this.remember({ id, path: filePath, createdAt: new Date().toISOString(), original: true });
-    return { datasetId: id, path: filePath, sizeBytes: stat.size, ...summarizeCityJSON(json) };
+    const sourcePath = await this.resolveOpenSource(source);
+    const filename = this.uniqueFilename(path.basename(sourcePath).replace(/[^A-Za-z0-9._-]/g, '_'));
+    const filePath = this.pathPolicy.workspacePath(`open-${crypto.randomUUID().slice(0, 8)}-${filename}`);
+    await fs.copyFile(sourcePath, filePath, fs.constants.COPYFILE_EXCL);
+    try {
+      const json = await readCityJSON(filePath);
+      const stat = await fs.stat(filePath);
+      const id = this.id();
+      await this.remember({ id, path: filePath, filename, createdAt: new Date().toISOString(), original: true, operation: 'open', sourcePath });
+      return { datasetId: id, filename, sizeBytes: stat.size, ...summarizeCityJSON(json) };
+    } catch (error) {
+      await fs.rm(filePath, { force: true });
+      throw error;
+    }
   }
 
   async listImports() {
@@ -75,7 +123,7 @@ export class DatasetManager {
     return { input: this.pathPolicy.input, count: files.length, files };
   }
 
-  async importFile(requestedFilename) {
+  async importFile(requestedFilename, displayFilename) {
     let filename = requestedFilename;
     if (!filename) {
       const available = await this.listImports();
@@ -87,7 +135,7 @@ export class DatasetManager {
     }
 
     const source = this.pathPolicy.inputPath(filename);
-    const safeName = path.basename(filename).replace(/[^A-Za-z0-9._-]/g, '_');
+    const safeName = this.uniqueFilename(path.basename(displayFilename || filename).replace(/[^A-Za-z0-9._-]/g, '_'));
     const filePath = this.pathPolicy.workspacePath(`import-${crypto.randomUUID().slice(0, 8)}-${safeName}`);
     await fs.copyFile(source, filePath, fs.constants.COPYFILE_EXCL);
     try {
@@ -103,7 +151,7 @@ export class DatasetManager {
         operation: 'import',
         sourceFilename: filename
       });
-      return { datasetId: id, filename, sizeBytes: stat.size, operation: 'import', ...summarizeCityJSON(json) };
+      return { datasetId: id, filename: safeName, sourceFilename: filename, sizeBytes: stat.size, operation: 'import', ...summarizeCityJSON(json) };
     } catch (error) {
       await fs.rm(filePath, { force: true });
       throw error;
@@ -115,13 +163,13 @@ export class DatasetManager {
     const sizeBytes = Buffer.byteLength(content, 'utf8');
     if (sizeBytes > maxBytes) throw new Error(`Uploaded CityJSON exceeds the ${maxBytes}-byte limit`);
     const json = parseCityJSON(content);
-    const suffix = path.basename(filename).replace(/[^A-Za-z0-9._-]/g, '_') || 'upload.city.json';
+    const suffix = this.uniqueFilename(path.basename(filename).replace(/[^A-Za-z0-9._-]/g, '_') || 'upload.city.json');
     const filePath = this.pathPolicy.workspacePath(`upload-${crypto.randomUUID().slice(0, 8)}-${suffix}`);
     await fs.writeFile(filePath, content, { encoding: 'utf8', flag: 'wx' });
     const id = this.id();
     try {
       await this.remember({ id, path: filePath, filename: suffix, createdAt: new Date().toISOString(), original: true, operation: 'upload' });
-      return { datasetId: id, path: filePath, sizeBytes, operation: 'upload', ...summarizeCityJSON(json) };
+      return { datasetId: id, filename: suffix, path: filePath, sizeBytes, operation: 'upload', ...summarizeCityJSON(json) };
     } catch (error) {
       await fs.rm(filePath, { force: true });
       throw error;
@@ -146,8 +194,8 @@ export class DatasetManager {
   }
 
   get(id) {
-    const ds = this.datasets.get(id);
-    if (!ds) throw new Error(`Unknown dataset_id: ${id}. Open or upload the file first.`);
+    const ds = this.datasets.get(id) || [...this.datasets.values()].find(dataset => dataset.filename === id);
+    if (!ds) throw new Error('The selected CityJSON file is unavailable. Open or upload it first.');
     return ds;
   }
 
@@ -155,7 +203,7 @@ export class DatasetManager {
     const ds = this.get(id);
     const json = await readCityJSON(ds.path);
     const stat = await fs.stat(ds.path);
-    return { datasetId: id, path: ds.path, sizeBytes: stat.size, ...summarizeCityJSON(json) };
+    return { datasetId: id, filename: ds.filename || path.basename(ds.path), path: ds.path, sizeBytes: stat.size, ...summarizeCityJSON(json) };
   }
 
   async load(id) { return readCityJSON(this.get(id).path); }
@@ -165,8 +213,14 @@ export class DatasetManager {
     const json = await readCityJSON(resolved);
     const stat = await fs.stat(resolved);
     const id = this.id();
-    await this.remember({ id, path: resolved, createdAt: new Date().toISOString(), original: false, operation, parents });
-    return { datasetId: id, path: resolved, operation, parentDatasetIds: parents, sizeBytes: stat.size, ...summarizeCityJSON(json) };
+    const parentDatasets = parents.map(parent => this.get(parent));
+    const parentName = parentDatasets[0]?.filename || 'cityjson';
+    const stem = (parentName || 'cityjson').replace(/(?:\.city)?\.json$/i, '').replace(/[^A-Za-z0-9._-]/g, '_');
+    const action = operation.replace(/^[^:]*:/, '').replace(/[^A-Za-z0-9_-]/g, '_');
+    const filename = this.uniqueFilename(`${stem}-${action}-${crypto.randomUUID().slice(0, 8)}.city.json`);
+    const parentIds = parentDatasets.map(parent => parent.id);
+    await this.remember({ id, path: resolved, filename, createdAt: new Date().toISOString(), original: false, operation, parents: parentIds });
+    return { datasetId: id, filename, path: resolved, operation, parentDatasetIds: parentIds, sizeBytes: stat.size, ...summarizeCityJSON(json) };
   }
 
   async save(id, destination, overwrite = false) {
@@ -177,11 +231,11 @@ export class DatasetManager {
       catch (e) { if (e.code !== 'ENOENT') throw e; }
     }
     await fs.copyFile(ds.path, output);
-    return { datasetId: id, source: ds.path, savedTo: output };
+    return { datasetId: ds.id, filename: ds.filename, savedTo: output };
   }
 
-  makeDerivedPath(id, suffix = 'city.json') {
+  makeDerivedPath(_id, suffix = 'city.json') {
     const token = crypto.randomUUID().slice(0, 8);
-    return path.join(this.pathPolicy.workspace, `${id}-${token}.${suffix}`);
+    return path.join(this.pathPolicy.workspace, `derived-${token}.${suffix}`);
   }
 }

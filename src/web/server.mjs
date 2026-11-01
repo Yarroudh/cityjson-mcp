@@ -10,6 +10,7 @@ import { McpGateway } from './mcp-gateway.mjs';
 import { createModelClient } from './model-client.mjs';
 import { MODEL_PROVIDER_NAMES, modelProvider } from './model-providers.mjs';
 import { receiveUploads } from './uploads.mjs';
+import { userFacingText, userFacingEventStream } from './user-facing.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const publicRoot = path.join(projectRoot, 'web');
@@ -182,15 +183,15 @@ function attachmentContext(files) {
   if (!files?.length) return '';
   const lines = files.map(file => {
     const summary = file.summary || {};
-    return `- ${JSON.stringify(file.originalFilename)}: dataset_id=${summary.datasetId}, stored inbox filename=${JSON.stringify(file.filename)}, size=${file.sizeBytes} bytes, CityObjects=${summary.cityObjectCount ?? 'unknown'}, vertices=${summary.vertexCount ?? 'unknown'}`;
+    return `- ${JSON.stringify(file.originalFilename)}: tool filename=${JSON.stringify(summary.filename || summary.datasetId)}, size=${file.sizeBytes} bytes, CityObjects=${summary.cityObjectCount ?? 'unknown'}, vertices=${summary.vertexCount ?? 'unknown'}`;
   });
-  return `\n\nThe chat host already imported these attachments through MCP. Use their dataset IDs directly:\n${lines.join('\n')}`;
+  return `\n\nThe chat host already registered these attachments through MCP. Use their tool filenames directly:\n${lines.join('\n')}`;
 }
 
-function activeDatasetContext(datasetId, originalFilename) {
-  if (!datasetId) return '';
-  const filename = originalFilename ? ` (${JSON.stringify(originalFilename)})` : '';
-  return `\n\nActive conversation dataset: dataset_id=${datasetId}${filename}. This is the exact current model for this conversation. Use this dataset ID directly for the user's request. Do not list the inbox, import another file, or ask which dataset they mean.`;
+function activeDatasetContext(fileReference, originalFilename) {
+  if (!fileReference) return '';
+  const source = originalFilename && originalFilename !== fileReference ? ` The original upload was ${JSON.stringify(originalFilename)}.` : '';
+  return `\n\nActive CityJSON file: ${JSON.stringify(fileReference)}.${source} This is the exact current file for this conversation. Use this filename in tool calls. Do not list the inbox, import another file, or ask which file the user means.`;
 }
 
 function recoveryFilename(value) {
@@ -208,7 +209,7 @@ async function prepareDatasetDownload(gateway, datasetId, body) {
   }
   const storedFilename = recoveryFilename(body.storedFilename);
   if (!storedFilename) throw new Error(result.modelContent || 'The dataset is unavailable and its source filename is unknown');
-  const recovered = await gateway.call('cityjson_import', { filename: storedFilename });
+  const recovered = await gateway.call('cityjson_import', { filename: storedFilename, ...(body.originalFilename ? { display_filename: body.originalFilename } : {}) });
   if (recovered.isError || typeof recovered.structuredContent?.datasetId !== 'string') {
     throw new Error(`The imported model could not be restored: ${recovered.modelContent || 'import failed'}`);
   }
@@ -569,7 +570,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         try {
           const imported = [];
           for (const file of uploaded) {
-            const result = await gateway.call('cityjson_import', { filename: file.filename });
+            const result = await gateway.call('cityjson_import', { filename: file.filename, display_filename: file.originalFilename });
             if (result.isError) throw new Error(`Could not import ${file.originalFilename}: ${result.modelContent}`);
             imported.push({ ...file, summary: result.structuredContent });
           }
@@ -658,15 +659,23 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           if (inspection.isError) {
             if (latestDatasetIsDerived) throw new Error('The derived dataset for this conversation expired after the server restarted. Recreate the transformation from the original file.');
             if (!storedFilename) throw new Error('The active dataset expired and its source filename is unavailable. Import the file again.');
-            const recovered = await gateway.call('cityjson_import', { filename: storedFilename }, { signal: turnController.signal });
+            const recovered = await gateway.call('cityjson_import', { filename: storedFilename, ...(originalFilename ? { display_filename: originalFilename } : {}) }, { signal: turnController.signal });
             if (recovered.isError || typeof recovered.structuredContent?.datasetId !== 'string') {
               throw new Error(`The active conversation file could not be restored: ${recovered.modelContent || 'import failed'}`);
             }
             latestDatasetId = recovered.structuredContent.datasetId;
             latestDatasetIsDerived = false;
+          } else if (typeof inspection.structuredContent?.filename === 'string') {
+            latestDatasetId = inspection.structuredContent.filename;
           }
         }
         const userMessage = `${message || 'Inspect the attached CityJSON file and summarize it.'}${attachmentContext(batch?.files)}${activeDatasetContext(latestDatasetId, originalFilename)}`;
+        const filenames = new Map((batch?.files || []).map(file => [file.summary?.datasetId, file.originalFilename]));
+        let currentFilename = originalFilename || batch?.files.at(-1)?.originalFilename || storedFilename || 'the file';
+        if (latestDatasetId && !filenames.has(latestDatasetId)) filenames.set(latestDatasetId, currentFilename);
+        const displayText = value => userFacingText(value, filenames, currentFilename);
+        const userStream = streamEvent ? userFacingEventStream(streamEvent, displayText) : null;
+        const onEvent = userStream ? event => userStream.send(event) : undefined;
         const checkpoint = { historyBefore: history, latestDatasetIdBefore: latestDatasetId, latestDatasetIsDerivedBefore: latestDatasetIsDerived };
         const sourceDatasetId = latestDatasetId;
         const resources = [];
@@ -676,6 +685,11 @@ export async function createChatApplication(config = getWebConfig(), dependencie
             const changedDataset = toolResult.structuredContent.datasetId !== latestDatasetId;
             latestDatasetId = toolResult.structuredContent.datasetId;
             if (changedDataset) latestDatasetIsDerived = !['cityjson_import', 'cityjson_import_text', 'cityjson_open'].includes(name);
+          }
+          const produced = toolResult.structuredContent?.derived || toolResult.structuredContent;
+          if (!toolResult.isError && typeof produced?.datasetId === 'string') {
+            currentFilename = produced.filename || currentFilename;
+            filenames.set(produced.datasetId, currentFilename);
           }
           resources.push(...(toolResult.downloads || []));
           return toolResult;
@@ -687,12 +701,12 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           callTool,
           {
             signal: turnController.signal,
-            onEvent: streamEvent || undefined
+            onEvent
           }
         );
         await ensureRequestedDownloads(message, latestDatasetId, resources, gateway, sourceDatasetId, {
           signal: turnController.signal,
-          onEvent: streamEvent || undefined,
+          onEvent,
           onProgress: progress => streamEvent?.({ type: 'tool_progress', id: 'download-fallback', name: 'cityjson_download', ...progress })
         });
         sessions.set(id, {
@@ -706,7 +720,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         });
         pruneState();
         const payload = {
-          message: result.text,
+          message: displayText(result.text),
           trace: result.trace,
           attachments: batch?.files || [],
           downloads: registerDownloads(resources),
@@ -714,6 +728,7 @@ export async function createChatApplication(config = getWebConfig(), dependencie
           datasetIsDerived: latestDatasetIsDerived
         };
         if (streamEvent) {
+          userStream.flush();
           streamEvent({ type: 'complete', ...payload });
           response.end();
         } else {
@@ -791,11 +806,11 @@ export async function createChatApplication(config = getWebConfig(), dependencie
         const cancelled = turnController?.signal.aborted || error?.name === 'AbortError';
         streamEvent(cancelled
           ? { type: 'cancelled', message: 'Response cancelled.' }
-          : { type: 'error', error: error.message });
+          : { type: 'error', error: userFacingText(error.message) });
         if (!response.writableEnded) response.end();
       } else {
         const status = /too large|exceeds|At most/.test(error.message) ? 413 : 400;
-        sendJson(response, status, { error: error.message });
+        sendJson(response, status, { error: userFacingText(error.message) });
       }
     } finally {
       turnCleanup?.();

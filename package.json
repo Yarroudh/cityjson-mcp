@@ -15,6 +15,7 @@
     "check": "node --check src/index.mjs && node scripts/check-all.mjs",
     "test": "node --test",
     "render:diagrams": "python3 scripts/render_diagrams.py",
+    "build:upload-app": "esbuild src/ui/upload-app.js --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=src/ui/upload-app.bundle.js",
     "doctor": "node scripts/doctor.mjs",
     "docker:build": "docker build -f docker/Dockerfile -t yarroudh/cityjson-mcp:latest .",
     "docker:cache:val3dity": "docker build -f docker/Dockerfile --target val3dity-builder -t cityjson-mcp-val3dity-builder .",
@@ -26,6 +27,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
     "@modelcontextprotocol/server": "^2.0.0",
     "busboy": "^1.6.0",
     "dompurify": "^3.4.14",
@@ -43,5 +45,8 @@
     "cjdb",
     "3d-city-models"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
 }

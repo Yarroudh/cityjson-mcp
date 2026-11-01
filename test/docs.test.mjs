@@ -46,13 +46,24 @@ test('README documents the architecture with an inline diagram', async () => {
   assert.doesNotMatch(readme, /diagrams\//);
 });
 
+test('standalone MCP client templates start without a project folder', async () => {
+  for (const filename of ['claude-desktop.json', 'claude-code.json', 'cursor-mcp.json', 'vscode-mcp.json']) {
+    const config = JSON.parse(await fs.readFile(path.join(root, 'config', filename), 'utf8'));
+    const entry = config.mcpServers?.cityjson || config.servers?.cityjson;
+    assert.equal(entry.command, 'docker');
+    assert.ok(entry.args.some(value => value.includes('cityjson-mcp-data,target=/data')));
+    assert.ok(!entry.args.some(value => value.includes('/absolute/path/to/project')));
+  }
+});
+
 test('README lists every registered MCP tool', async () => {
   const [readme, registration] = await Promise.all([
     fs.readFile(path.join(root, 'README.md'), 'utf8'),
     fs.readFile(path.join(root, 'src', 'tools', 'register-tools.mjs'), 'utf8')
   ]);
   const names = [...registration.matchAll(/server\.registerTool\('([^']+)'/g)].map(match => match[1]);
-  assert.equal(names.length, 37);
+  names.push('cityjson_upload');
+  assert.equal(names.length, 38);
   for (const name of names) assert.match(readme, new RegExp(`\\b${name}\\b`), `${name} must be documented`);
 });
 
@@ -62,8 +73,9 @@ test('detailed tool reference documents every registered MCP tool exactly once',
     fs.readFile(path.join(root, 'src', 'tools', 'register-tools.mjs'), 'utf8')
   ]);
   const registered = [...registration.matchAll(/server\.registerTool\('([^']+)'/g)].map(match => match[1]);
+  registered.push('cityjson_upload');
   const documented = [...reference.matchAll(/^### `([^`]+)`$/gm)].map(match => match[1]);
-  assert.equal(registered.length, 37);
+  assert.equal(registered.length, 38);
   assert.deepEqual(documented.sort(), registered.sort());
   assert.match(reference, /parameters/i);
   assert.match(reference, /how it works/i);

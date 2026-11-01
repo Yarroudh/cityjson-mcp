@@ -86,9 +86,12 @@ test('lists and imports a CityJSON file from the configured inbox by filename', 
   const available = await dm.listImports();
   assert.equal(available.count, 1);
   assert.equal(available.files[0].filename, 'city.city.json');
-  const imported = await dm.importFile('city.city.json');
+  const imported = await dm.importFile('city.city.json', 'my model.city.json');
   assert.equal(imported.operation, 'import');
+  assert.equal(imported.filename, 'my_model.city.json');
+  assert.equal(imported.sourceFilename, 'city.city.json');
   assert.equal(imported.cityObjectCount, 2);
+  assert.equal(dm.get(imported.filename).id, imported.datasetId);
   assert.equal(path.dirname(dm.get(imported.datasetId).path), workspace);
 });
 
@@ -106,5 +109,38 @@ test('restores dataset handles from the persistent workspace registry', async t 
   const imported = await first.importContent(await fs.readFile(samplePath, 'utf8'), 'persistent.city.json');
   const second = new DatasetManager(policy);
   assert.equal(second.get(imported.datasetId).path, imported.path);
+  assert.equal(second.get(imported.filename).path, imported.path);
   assert.equal((await second.load(imported.datasetId)).type, 'CityJSON');
+});
+
+test('opens a project file by name, snapshots it, and accepts its filename for later calls', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cityjson-open-test-'));
+  try {
+    const models = path.join(rootDir, 'models');
+    const nested = path.join(models, 'tiles');
+    const workspace = path.join(rootDir, 'workspace');
+    await fs.mkdir(nested, { recursive: true });
+    await fs.mkdir(workspace);
+    const source = path.join(nested, 'sample.city.json');
+    await fs.copyFile(samplePath, source);
+    const dm = new DatasetManager({
+      roots: [models], workspace,
+      workspacePath: name => path.join(workspace, name),
+      assertReadable: value => path.resolve(value)
+    });
+    const opened = await dm.open('sample.city.json');
+    assert.equal(opened.filename, 'sample.city.json');
+    assert.equal(dm.get(opened.filename).id, opened.datasetId);
+    await fs.writeFile(source, '{"type":"CityJSON","CityObjects":{},"vertices":[]}');
+    assert.equal((await dm.load(opened.filename)).CityObjects['building-1'].type, 'Building');
+    const second = await dm.open('tiles/sample.city.json');
+    assert.notEqual(second.filename, opened.filename);
+    assert.equal(dm.get(second.filename).id, second.datasetId);
+    const other = path.join(models, 'other');
+    await fs.mkdir(other);
+    await fs.copyFile(source, path.join(other, 'sample.city.json'));
+    await assert.rejects(() => dm.open('sample.city.json'), /More than one file/);
+  } finally {
+    await fs.rm(rootDir, { recursive: true, force: true });
+  }
 });

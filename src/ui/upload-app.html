@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Upload CityJSON</title>
+  <style>
+    :root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
+    body { margin: 0; padding: 16px; }
+    main { border: 1px dashed #8293a4; border-radius: 10px; padding: 20px; text-align: center; }
+    input { max-width: 100%; }
+    p { line-height: 1.4; }
+    progress { width: 100%; margin-top: 12px; }
+    #status { min-height: 1.5em; }
+  </style>
+</head>
+<body>
+  <main>
+    <strong>Select a CityJSON file</strong>
+    <p>Choose or drop a .json file. It is sent directly to the CityJSON server.</p>
+    <input id="file" type="file" accept=".json,application/json" aria-label="Choose a CityJSON file">
+    <progress id="progress" max="100" value="0" hidden></progress>
+    <p id="status" role="status" aria-live="polite"></p>
+  </main>
+  <script>/* UPLOAD_APP_BUNDLE */</script>
+</body>
+</html>
